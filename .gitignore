@@ -1,0 +1,24 @@
+# Environment variables (CONTAINS PRIVATE KEYS - NEVER COMMIT!)
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
