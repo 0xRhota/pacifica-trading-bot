@@ -65,6 +65,9 @@ class LiveTradingBot:
                 logger.info(f"💰 Balance: ${float(account.get('balance', 0)):.2f}")
                 logger.info(f"💰 Equity: ${float(account.get('account_equity', 0)):.2f}")
 
+            # Load existing positions from API on startup
+            await self._sync_positions_from_api()
+
             # Main loop
             while self.running:
                 try:
@@ -75,8 +78,41 @@ class LiveTradingBot:
                     logger.error(f"Error in main loop: {e}", exc_info=True)
                     await asyncio.sleep(5)
 
+    async def _sync_positions_from_api(self):
+        """Sync local position tracking with actual API positions"""
+        result = self.sdk.get_positions()
+        if not result.get('success'):
+            logger.error("Failed to get positions from API")
+            return
+
+        api_positions = result.get('data', [])
+
+        if api_positions:
+            logger.info(f"📊 Found {len(api_positions)} existing positions in API")
+            for pos in api_positions:
+                symbol = pos.get('symbol')
+                # We don't have order_id from positions endpoint, so we can't track these
+                # Log them but don't add to tracking
+                logger.info(f"   {symbol}: {pos.get('side')} {pos.get('amount')} @ ${pos.get('entry_price')}")
+                logger.warning(f"   ⚠️  Position opened outside bot - cannot auto-manage")
+        else:
+            logger.info("✅ No existing positions - clean start")
+
     async def _check_and_manage_positions(self):
         """Check positions and close if needed"""
+        # First, sync with API to detect externally closed positions
+        result = self.sdk.get_positions()
+        if result.get('success'):
+            api_positions = result.get('data', [])
+            api_symbols = set(p.get('symbol') for p in api_positions)
+
+            # Remove positions from tracking if they were closed externally
+            for symbol in list(self.open_positions.keys()):
+                if symbol not in api_symbols:
+                    order_id = self.open_positions[symbol]
+                    logger.warning(f"⚠️  {symbol} position #{order_id} closed externally - removing from tracking")
+                    del self.open_positions[symbol]
+
         if not self.open_positions:
             return
 
