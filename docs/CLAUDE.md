@@ -169,6 +169,17 @@ signature_payload = {
 
 ## Known Issues & Fixes
 
+### ✅ Position Monitoring Bug (FIXED - CRITICAL)
+- **Issue**: Bot kept monitoring phantom positions after they were manually closed in UI
+- **Cause**: Bot tracked positions in local dict, never checked API for external closes
+- **Impact**: Would try to manage non-existent positions indefinitely
+- **Fix**: Added API position syncing on startup and every check cycle
+  - `_sync_positions_from_api()` - called on startup
+  - `_check_and_manage_positions()` - verifies API positions every cycle
+  - Detects externally closed positions and removes from tracking
+- **Location**: live_bot.py:81-99, live_bot.py:101-114
+- **Status**: Fixed and tested - bot now shows correct leverage (0.00x vs incorrect 0.17x)
+
 ### ✅ Position Sizing Bug (FIXED)
 - **Issue**: First live order was 0.01 BTC (~$1,242) instead of $10-15
 - **Cause**: Variable `actual_value` referenced before definition in fee calculation
