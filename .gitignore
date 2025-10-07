@@ -2,9 +2,11 @@
 .env
 .env.local
 .env.*.local
+.env.*
 
 # Logs
 *.log
+logs/
 
 # Trade data
 trades.json
@@ -16,6 +18,9 @@ __pycache__/
 *$py.class
 *.so
 .Python
+venv/
+env/
+ENV/
 
 # IDE
 .vscode/
@@ -26,3 +31,6 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+# Archive
+archive/

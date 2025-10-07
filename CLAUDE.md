@@ -33,6 +33,48 @@ LONGS_ONLY = True              # Bull market mode
 - `BTC` - Bitcoin
 - `ETH` - Ethereum
 
+## Repository Structure
+
+```
+pacifica-trading-bot/
+├── Core Bot Files
+│   ├── live_bot.py          # Main live trading bot
+│   ├── pacifica_sdk.py      # SDK for order placement & positions
+│   ├── pacifica_bot.py      # API client for market data
+│   ├── strategies.py        # Trading strategy logic
+│   ├── risk_manager.py      # Risk management
+│   ├── trade_tracker.py     # Trade logging & analytics
+│   └── config.py            # Configuration settings
+│
+├── Helper Scripts
+│   ├── place_order_now.py   # Test single order placement
+│   ├── view_trades.py       # View trading statistics
+│   ├── sync_tracker.py      # Sync tracker with API
+│   └── check_status.sh      # Bot status check
+│
+├── Documentation
+│   ├── README.md            # User-facing documentation
+│   ├── CLAUDE.md            # AI development guide (this file)
+│   ├── PROGRESS.md          # Development history
+│   └── SETUP.md             # Original setup notes
+│
+├── Configuration
+│   ├── .env                 # Private keys (GITIGNORED)
+│   ├── .env.README          # Environment setup guide
+│   ├── .gitignore           # Git ignore rules
+│   └── requirements.txt     # Python dependencies
+│
+├── Data (Gitignored)
+│   ├── trades.json          # Trade history
+│   ├── *.log                # Log files
+│   └── live_bot_output.log  # Current bot logs
+│
+└── archive/                 # Old/deprecated files
+    ├── main.py              # Original volume farming bot
+    ├── test_bot.py          # Early tests
+    └── ...                  # Other deprecated files
+```
+
 ## Architecture
 
 ### Core Files
@@ -47,6 +89,7 @@ LONGS_ONLY = True              # Bull market mode
 **pacifica_sdk.py** - SDK wrapper for order placement
 - Handles Solana wallet signing (Ed25519)
 - Creates market orders with proper authentication
+- `get_positions()` - Fetches current open positions
 - Based on official Pacifica Python SDK
 
 **pacifica_bot.py** - API interaction layer
@@ -78,7 +121,17 @@ LONGS_ONLY = True              # Bull market mode
 
 **place_order_now.py** - Test script for single orders
 **view_trades.py** - View trading statistics and history
-**test_bot.py** - Original testing script (deprecated)
+**sync_tracker.py** - Sync trade tracker with actual API positions
+**check_status.sh** - Quick bot status check script
+
+### Archived Files
+
+Old test and development files moved to `archive/` directory:
+- `main.py` - Original volume farming bot (deprecated)
+- `test_bot.py` - Early testing script
+- `test_live.py` - Live trading tests
+- `dry_run_bot.py` - Dry run testing
+- `place_test_order.py` - Order placement tests
 
 ## API Details
 
@@ -86,11 +139,17 @@ LONGS_ONLY = True              # Bull market mode
 ```
 Base URL: https://api.pacifica.fi/api/v1
 
-GET /book?symbol={symbol}     # Orderbook
-GET /price?symbol={symbol}    # Current price
-GET /account?address={addr}   # Account info
-POST /order                   # Place order (requires signature)
+GET  /book?symbol={symbol}       # Orderbook
+GET  /price?symbol={symbol}      # Current price
+GET  /account?address={addr}     # Account info (via pacifica_bot.py)
+GET  /positions?account={addr}   # Open positions (via SDK)
+POST /orders/create_market       # Place order (requires signature)
 ```
+
+**Important**:
+- Position data comes from `/positions?account={address}` endpoint
+- Returns **net positions** (combined), not individual orders
+- Use `pacifica_sdk.get_positions()` to fetch current positions
 
 ### Order Placement
 Orders require Solana wallet signature using this structure:
@@ -110,21 +169,31 @@ signature_payload = {
 
 ## Known Issues & Fixes
 
-### Position Sizing Bug (FIXED)
+### ✅ Position Sizing Bug (FIXED)
 - **Issue**: First live order was 0.01 BTC (~$1,242) instead of $10-15
 - **Cause**: Variable `actual_value` referenced before definition in fee calculation
 - **Fix**: Added `actual_value = size * current_price` before usage + safety check
 - **Location**: live_bot.py:188, live_bot.py:269
+- **Status**: Fixed and tested
 
-### Lot Size Requirements
+### ✅ Lot Size Requirements (SOLVED)
 - All orders must be multiples of 0.01
 - Must use `math.ceil(size / 0.01) * 0.01` to round UP
 - Minimum order value: $10
+- **Status**: Implemented and working
 
-### API Connection Errors
+### ⚠️ API Connection Errors (MONITORING)
 - Bot handles intermittent connection errors gracefully
 - Retries on next check cycle (45s)
 - Logs errors but continues running
+- **Status**: Non-critical, normal operation
+
+### 📝 Position Tracking Limitation (BY DESIGN)
+- **Behavior**: Pacifica API returns net positions (combined), not individual orders
+- **Example**: Two SOL orders (0.05 + 0.06) show as single 0.11 SOL position in API
+- **Impact**: Trade tracker shows individual orders, but API shows combined
+- **Workaround**: Use `sync_tracker.py` to reconcile with API
+- **Status**: This is how Pacifica works, not a bug
 
 ## Running the Bot
 
@@ -189,11 +258,14 @@ All trades logged to `trades.json`:
 
 ## Current Status
 
-- **Bot Status**: Running (PID check required)
+- **Bot Status**: ✅ LIVE TRADING (running in background)
 - **Account Balance**: ~$145
-- **Latest Trade**: Order #375064273 (SOL)
-- **Win Rate**: 0% (early testing phase)
-- **Total P&L**: -$1.33 (mostly from initial bug)
+- **Open Positions**: 2 (BTC and SOL)
+  - BTC: 0.01 BTC @ $124,266
+  - SOL: 0.11 SOL @ $233.35 (combined position)
+- **Latest Trade**: Order #375064273 (SOL) - **FIRST WINNER!** +$0.02
+- **Win Rate**: 25% (1 win, 3 losses)
+- **Total P&L**: -$1.31
 
 ## Future Improvements
 
