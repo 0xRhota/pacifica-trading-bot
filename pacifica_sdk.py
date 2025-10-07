@@ -137,3 +137,22 @@ class PacificaSDK:
     def get_account_address(self) -> str:
         """Get the account's public address"""
         return self.public_key
+
+    def get_positions(self) -> Dict:
+        """
+        Get all open positions for the account
+
+        Returns:
+            API response dict with positions data
+        """
+        url = f"{self.base_url}/positions?account={self.public_key}"
+        response = requests.get(url)
+
+        try:
+            return response.json()
+        except:
+            return {
+                "status_code": response.status_code,
+                "text": response.text,
+                "success": False
+            }

@@ -4,85 +4,88 @@ Sync trade tracker with actual Pacifica API positions
 This fixes stale "open" positions in the tracker
 """
 
-import asyncio
-from pacifica_bot import PacificaAPI, TradingConfig
+import os
+from pacifica_sdk import PacificaSDK
 from config import BotConfig
 from trade_tracker import tracker
 
-async def sync_tracker():
+def sync_tracker():
     """Sync tracker with actual API positions"""
     print("Syncing trade tracker with Pacifica API...")
 
-    config = TradingConfig(
-        api_key=BotConfig.API_KEY,
-        base_url=BotConfig.BASE_URL,
-        symbols=BotConfig.TRADING_SYMBOLS
-    )
+    # Load private key
+    with open('.env') as f:
+        for line in f:
+            if line.startswith('SOLANA_PRIVATE_KEY='):
+                private_key = line.split('=', 1)[1].strip()
+                break
 
-    async with PacificaAPI(config) as api:
-        # Get actual open positions from API
-        account = await api.get_account_info(BotConfig.ACCOUNT_ADDRESS)
-        if not account:
-            print("❌ Could not get account info from API")
-            return
+    sdk = PacificaSDK(private_key, BotConfig.BASE_URL)
 
-        actual_positions = account.get('positions', [])
-        actual_order_ids = set()
+    # Get actual positions from API
+    result = sdk.get_positions()
+    if not result.get('success'):
+        print("❌ Could not get positions from API")
+        print(f"Error: {result}")
+        return
 
-        if actual_positions:
-            print(f"\n✅ Found {len(actual_positions)} actual open positions:")
-            for pos in actual_positions:
-                order_id = str(pos.get('order_id', ''))
-                if order_id:
-                    actual_order_ids.add(order_id)
-                    print(f"  Order #{order_id}: {pos.get('symbol')} {pos.get('side')} {pos.get('size')}")
-        else:
-            print("\n✅ No open positions in Pacifica API")
+    actual_positions = result.get('data', [])
 
-        # Get tracker's open positions
-        tracker_open = tracker.get_open_trades()
-        tracker_order_ids = set(t['order_id'] for t in tracker_open if t.get('order_id'))
+    if actual_positions:
+        print(f"\n✅ Found {len(actual_positions)} actual open positions:")
+        for pos in actual_positions:
+            symbol = pos.get('symbol')
+            side = pos.get('side')
+            amount = pos.get('amount')
+            entry_price = pos.get('entry_price')
+            print(f"  {symbol}: {side} {amount} @ ${entry_price}")
+    else:
+        print("\n✅ No open positions in Pacifica API")
 
-        print(f"\n📊 Tracker shows {len(tracker_open)} open positions:")
-        for t in tracker_open:
-            print(f"  Order #{t['order_id']}: {t['symbol']} {t['side']} {t['size']}")
+    # Get tracker's open positions
+    tracker_open = tracker.get_open_trades()
 
-        # Find positions that tracker thinks are open but aren't
-        stale_positions = tracker_order_ids - actual_order_ids
+    print(f"\n📊 Tracker shows {len(tracker_open)} open positions:")
+    for t in tracker_open:
+        print(f"  Order #{t['order_id']}: {t['symbol']} {t['side']} {t['size']}")
 
-        if stale_positions:
-            print(f"\n⚠️  Found {len(stale_positions)} stale positions in tracker:")
-            for order_id in stale_positions:
-                # Find the trade
-                for t in tracker_open:
-                    if t['order_id'] == order_id:
-                        symbol = t['symbol']
-                        entry_price = t['entry_price']
+    # Build a map of actual positions by symbol+side
+    actual_map = {}
+    for pos in actual_positions:
+        symbol = pos.get('symbol')
+        side = 'buy' if pos.get('side') == 'bid' else 'sell'
+        amount = float(pos.get('amount'))
+        key = f"{symbol}_{side}"
+        actual_map[key] = {
+            'symbol': symbol,
+            'side': side,
+            'amount': amount,
+            'entry_price': float(pos.get('entry_price'))
+        }
 
-                        # Get current price to estimate exit
-                        current_price = await api.get_market_price(symbol)
-                        if not current_price:
-                            current_price = entry_price  # Fallback to entry
+    # For each tracker position, check if it still exists
+    for t in tracker_open:
+        symbol = t['symbol']
+        side = t['side']
+        order_id = t['order_id']
+        key = f"{symbol}_{side}"
 
-                        print(f"  Closing Order #{order_id} ({symbol}) in tracker...")
-                        print(f"    Entry: ${entry_price:.2f}, Est. Exit: ${current_price:.2f}")
+        # Check if this position type exists in actual positions
+        if key not in actual_map:
+            print(f"\n⚠️  Position {symbol} {side} (Order #{order_id}) is closed in API")
+            print(f"  Closing in tracker...")
 
-                        # Log exit in tracker
-                        tracker.log_exit(
-                            order_id=order_id,
-                            exit_price=current_price,
-                            exit_reason="Manual close (API sync)",
-                            fees=0.0  # Can't determine actual fees
-                        )
-                        break
+            # Close with no P&L (already closed elsewhere)
+            tracker.log_exit(
+                order_id=order_id,
+                exit_price=t['entry_price'],  # Use entry price since we don't know
+                exit_reason="Closed outside bot (API sync)",
+                fees=0.0
+            )
 
-            print(f"\n✅ Synced {len(stale_positions)} positions")
-        else:
-            print("\n✅ Tracker is in sync with API!")
-
-        # Print updated stats
-        print("\n" + "="*60)
-        tracker.print_stats()
+    print("\n✅ Sync complete!")
+    print("\n" + "="*60)
+    tracker.print_stats()
 
 if __name__ == "__main__":
-    asyncio.run(sync_tracker())
+    sync_tracker()
