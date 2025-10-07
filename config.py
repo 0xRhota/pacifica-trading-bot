@@ -14,8 +14,8 @@ class BotConfig:
     # Trading Parameters
     MIN_POSITION_SIZE_USD = 10.0   # Minimum position size (Pacifica requirement)
     MAX_POSITION_SIZE_USD = 15.0   # Maximum position size in USD (small to start)
-    MIN_PROFIT_THRESHOLD = 0.002   # 0.2% minimum profit to close
-    MAX_LOSS_THRESHOLD = 0.003     # 0.3% maximum loss before closing
+    MIN_PROFIT_THRESHOLD = 0.05    # 5% minimum profit to close - let winners run
+    MAX_LOSS_THRESHOLD = 0.003     # 0.3% maximum loss before closing - tight stop loss
     MAX_LEVERAGE = 5.0             # Maximum leverage to use
     LOT_SIZE = 0.01                # Minimum increment for order size
 
@@ -23,12 +23,14 @@ class BotConfig:
     CHECK_FREQUENCY_SECONDS = 45   # How often to check positions
     TRADE_FREQUENCY_SECONDS = 900  # How often to open new positions (15 minutes)
     MAX_POSITION_HOLD_TIME = 1800  # Max time to hold position (30 minutes)
-    
-    # Symbols to trade (Pacifica uses simple symbols: BTC, SOL, ETH)
+
+    # Symbols to trade - rotated through in order
     TRADING_SYMBOLS = [
         "SOL",
+        "PENGU",
         "BTC",
-        "ETH"
+        "XPL",
+        "ASTER"
     ]
     
     # Trading Strategy

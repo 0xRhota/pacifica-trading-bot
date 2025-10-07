@@ -34,3 +34,6 @@ Thumbs.db
 
 # Archive
 archive/
+
+# Research credentials
+research/**/.env

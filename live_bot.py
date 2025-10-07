@@ -212,7 +212,15 @@ class LiveTradingBot:
             # Calculate position size (round up to meet $10 minimum)
             position_value = random.uniform(BotConfig.MIN_POSITION_SIZE_USD, BotConfig.MAX_POSITION_SIZE_USD)
             size = position_value / current_price
-            size = math.ceil(size / BotConfig.LOT_SIZE) * BotConfig.LOT_SIZE
+
+            # Some tokens require whole numbers (lot size 1), others allow decimals
+            # PENGU, XPL, ASTER require whole numbers based on API errors
+            whole_number_tokens = ["PENGU", "XPL", "ASTER", "BTC"]
+            if symbol in whole_number_tokens:
+                size = math.ceil(size)  # Round up to whole number
+            else:
+                size = math.ceil(size / BotConfig.LOT_SIZE) * BotConfig.LOT_SIZE
+
             actual_value = size * current_price
 
             # Verify meets minimum
