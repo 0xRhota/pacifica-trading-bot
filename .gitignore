@@ -6,6 +6,10 @@
 # Logs
 *.log
 
+# Trade data
+trades.json
+trades.csv
+
 # Python
 __pycache__/
 *.py[cod]
