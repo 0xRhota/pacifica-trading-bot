@@ -64,7 +64,7 @@ MAX_LEVERAGE = 5.0             # Maximum 5x leverage
 
 ### 4. Test Single Order (Optional)
 ```bash
-python3 place_order_now.py
+python3 scripts/place_order_now.py
 ```
 This places one test order to verify everything works.
 
@@ -87,7 +87,7 @@ tail -f live_bot_output.log
 
 ### View Trading Statistics
 ```bash
-python3 view_trades.py
+python3 scripts/view_trades.py
 ```
 
 Output example:
@@ -316,21 +316,21 @@ python3 live_bot.py
 ### Testing
 ```bash
 # Test single order
-python3 place_order_now.py
+python3 scripts/place_order_now.py
 
 # View current positions
 python3 -c "from pacifica_bot import *; import asyncio; asyncio.run(check_positions())"
 
 # Check trade stats
-python3 view_trades.py
+python3 scripts/view_trades.py
 ```
 
 ## Documentation
 
-- **CLAUDE.md**: Comprehensive guide for AI development
-- **PROGRESS.md**: Complete development history and lessons learned
-- **SETUP.md**: Original setup instructions
 - **README.md**: This file - user-facing documentation
+- **docs/CLAUDE.md**: Comprehensive guide for AI development
+- **docs/PROGRESS.md**: Complete development history and lessons learned
+- **docs/SETUP.md**: Original setup instructions
 
 ## Repository
 

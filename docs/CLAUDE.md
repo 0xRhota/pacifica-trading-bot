@@ -37,7 +37,7 @@ LONGS_ONLY = True              # Bull market mode
 
 ```
 pacifica-trading-bot/
-├── Core Bot Files
+├── Core Bot Files (root)
 │   ├── live_bot.py          # Main live trading bot
 │   ├── pacifica_sdk.py      # SDK for order placement & positions
 │   ├── pacifica_bot.py      # API client for market data
@@ -46,33 +46,33 @@ pacifica-trading-bot/
 │   ├── trade_tracker.py     # Trade logging & analytics
 │   └── config.py            # Configuration settings
 │
-├── Helper Scripts
+├── scripts/                 # Helper utilities
 │   ├── place_order_now.py   # Test single order placement
 │   ├── view_trades.py       # View trading statistics
 │   ├── sync_tracker.py      # Sync tracker with API
 │   └── check_status.sh      # Bot status check
 │
-├── Documentation
-│   ├── README.md            # User-facing documentation
+├── docs/                    # Documentation
 │   ├── CLAUDE.md            # AI development guide (this file)
 │   ├── PROGRESS.md          # Development history
 │   └── SETUP.md             # Original setup notes
 │
-├── Configuration
+├── archive/                 # Deprecated files (gitignored)
+│   ├── main.py              # Original volume farming bot
+│   ├── test_bot.py          # Early tests
+│   └── ...                  # Other old files
+│
+├── Configuration Files
+│   ├── README.md            # User-facing documentation
 │   ├── .env                 # Private keys (GITIGNORED)
 │   ├── .env.README          # Environment setup guide
 │   ├── .gitignore           # Git ignore rules
 │   └── requirements.txt     # Python dependencies
 │
-├── Data (Gitignored)
-│   ├── trades.json          # Trade history
-│   ├── *.log                # Log files
-│   └── live_bot_output.log  # Current bot logs
-│
-└── archive/                 # Old/deprecated files
-    ├── main.py              # Original volume farming bot
-    ├── test_bot.py          # Early tests
-    └── ...                  # Other deprecated files
+└── Data Files (gitignored)
+    ├── trades.json          # Trade history
+    ├── *.log                # Log files
+    └── live_bot_output.log  # Current bot logs
 ```
 
 ## Architecture
