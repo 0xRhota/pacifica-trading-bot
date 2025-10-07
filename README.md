@@ -7,11 +7,10 @@ A live trading bot for Pacifica.fi (Solana perpetual derivatives exchange) desig
 ## Current Status
 
 - ✅ **LIVE TRADING** - Bot is actively placing real orders
-- 📊 Account Balance: ~$145 USDC
 - 🎯 Position Size: $10-$15 per trade
 - 📈 Strategy: Longs only (bull market mode)
 - ⏰ Trade Frequency: Every 15 minutes
-- 🛡️ Risk Controls: 0.3% stop loss, 0.2% take profit
+- 🛡️ Risk Controls: 0.3% stop loss, 5% take profit
 
 ## Features
 
@@ -45,10 +44,7 @@ pip install aiohttp python-dotenv solders base58
 ```
 
 ### 2. Set Up Environment
-Create a `.env` file in the project root:
-```bash
-SOLANA_PRIVATE_KEY=your_base58_private_key_here
-```
+Create a `.env` file in the project root with your Solana wallet private key.
 
 ⚠️ **NEVER commit the `.env` file to git!**
 
@@ -57,7 +53,7 @@ Edit `config.py` to adjust trading parameters:
 ```python
 MIN_POSITION_SIZE_USD = 10.0   # Minimum $10 (Pacifica requirement)
 MAX_POSITION_SIZE_USD = 15.0   # Maximum $15 (conservative)
-MIN_PROFIT_THRESHOLD = 0.002   # Take profit at +0.2%
+MIN_PROFIT_THRESHOLD = 0.05    # Take profit at +5%
 MAX_LOSS_THRESHOLD = 0.003     # Stop loss at -0.3%
 MAX_LEVERAGE = 5.0             # Maximum 5x leverage
 ```
@@ -111,12 +107,7 @@ ps aux | grep "python.*live_bot"
 ```
 
 ### Check Account Balance
-The bot logs balance info on startup and periodically:
-```
-💰 Balance: $145.78
-💰 Equity: $145.89
-💰 Leverage: 0.17x
-```
+The bot logs balance info on startup and periodically.
 
 ## Configuration
 
@@ -126,7 +117,7 @@ The bot logs balance info on startup and periodically:
 |-----------|-------|-------------|
 | MIN_POSITION_SIZE_USD | 10.0 | Minimum position size (Pacifica requirement) |
 | MAX_POSITION_SIZE_USD | 15.0 | Maximum position size (risk limit) |
-| MIN_PROFIT_THRESHOLD | 0.002 | Take profit at +0.2% |
+| MIN_PROFIT_THRESHOLD | 0.05 | Take profit at +5% |
 | MAX_LOSS_THRESHOLD | 0.003 | Stop loss at -0.3% |
 | MAX_LEVERAGE | 5.0 | Maximum leverage allowed |
 | LOT_SIZE | 0.01 | Minimum order size increment |
@@ -137,8 +128,10 @@ The bot logs balance info on startup and periodically:
 
 ### Trading Symbols
 - SOL - Solana
+- PENGU - Pudgy Penguins
 - BTC - Bitcoin
-- ETH - Ethereum
+- XPL - XPL token
+- ASTER - Aster token
 
 ## Architecture
 
@@ -208,7 +201,7 @@ signature_payload = {
 
 ### Stop Loss / Take Profit
 - **Stop Loss**: Automatic close at -0.3% loss
-- **Take Profit**: Automatic close at +0.2% profit
+- **Take Profit**: Automatic close at +5% profit
 - **Time Limit**: Forced close after 30 minutes
 
 ### Leverage Control
@@ -223,33 +216,7 @@ signature_payload = {
 
 ## Trade Tracking
 
-All trades are logged to `trades.json`:
-```json
-{
-  "timestamp": "2025-10-06T21:15:23.604",
-  "order_id": "375064273",
-  "symbol": "SOL",
-  "side": "buy",
-  "size": 0.06,
-  "entry_price": 233.035,
-  "exit_price": 232.50,
-  "pnl": -0.0706,
-  "pnl_pct": -0.0033,
-  "fees": 0.0164,
-  "status": "closed",
-  "exit_reason": "Stop loss: -0.3315%",
-  "notes": "Live bot - bid order"
-}
-```
-
-## Performance Metrics
-
-Current statistics (updated 2025-10-06):
-- **Total Trades**: 3 closed, 1 open
-- **Win Rate**: 0% (early testing phase)
-- **Total P&L**: -$1.33 (mostly fees and initial bug)
-- **Average Loss**: -$0.44
-- **Largest Loss**: -$1.24 (initial bug, now fixed)
+All trades are logged to `trades.json` with entry/exit prices, P&L, fees, and exit reasons.
 
 ## Safety Features
 
@@ -336,7 +303,6 @@ python3 scripts/view_trades.py
 
 - **GitHub**: github.com/0xRhota/pacifica-trading-bot
 - **Branch**: main
-- **Account**: 8saejVsbEBraGvxbJGxrosv4QKMfR2i8f59GFAnMXfMc
 
 ## Legal Disclaimer
 
