@@ -1,108 +1,359 @@
-# Pacifica Volume Farming Bot
+# Pacifica Trading Bot
 
-A sophisticated trading bot designed to maximize trading volume on Pacifica.fi while minimizing risk. Built for the Pacifica points program that rewards users based on trading activity.
+A live trading bot for Pacifica.fi (Solana perpetual derivatives exchange) designed for organic, profitable trading. This bot places **real orders with real money** and is optimized for conservative position sizing and risk management.
+
+⚠️ **This bot trades with REAL MONEY on Pacifica.fi mainnet**
+
+## Current Status
+
+- ✅ **LIVE TRADING** - Bot is actively placing real orders
+- 📊 Account Balance: ~$145 USDC
+- 🎯 Position Size: $10-$15 per trade
+- 📈 Strategy: Longs only (bull market mode)
+- ⏰ Trade Frequency: Every 15 minutes
+- 🛡️ Risk Controls: 0.3% stop loss, 0.2% take profit
 
 ## Features
 
-- **Volume Maximization**: Optimized to generate maximum trading volume through rapid open/close cycles
-- **Risk Management**: Comprehensive risk controls to protect capital
-- **Multiple Strategies**: Volume farming, spread capture, and momentum trading
-- **Real-time Monitoring**: Live status updates and performance metrics
-- **Emergency Controls**: Automatic stop-loss and daily loss limits
+### Trading Strategy
+- **Longs Only Mode**: Only opens long positions (bull market optimized)
+- **Small Position Sizing**: $10-$15 per trade for conservative risk management
+- **Automatic Risk Management**:
+  - Stop loss at -0.3%
+  - Take profit at +0.2%
+  - Max hold time: 30 minutes
+- **Organic Trading Pattern**:
+  - Positions every 15 minutes
+  - Position monitoring every 45 seconds
+  - Random position sizing within limits
+
+### Trade Tracking
+- **Persistent Logging**: All trades saved to `trades.json`
+- **Analytics**: Win rate, P&L, fees, best/worst trades
+- **Statistics Dashboard**: View performance with `view_trades.py`
+
+### Security
+- **Wallet Signatures**: Ed25519 cryptographic signing via Solana wallet
+- **Private Key Protection**: Stored in `.env` (gitignored)
+- **Safety Checks**: Multiple layers of position size validation
 
 ## Quick Start
 
-1. **Install Dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+### 1. Install Dependencies
+```bash
+pip install aiohttp python-dotenv solders base58
+```
 
-2. **Configure API Key**:
-   Edit `config.py` and add your Pacifica API key:
-   ```python
-   API_KEY = "your_api_key_here"
-   ```
+### 2. Set Up Environment
+Create a `.env` file in the project root:
+```bash
+SOLANA_PRIVATE_KEY=your_base58_private_key_here
+```
 
-3. **Run the Bot**:
-   ```bash
-   python main.py
-   ```
+⚠️ **NEVER commit the `.env` file to git!**
 
-## Configuration
+### 3. Configure Bot
+Edit `config.py` to adjust trading parameters:
+```python
+MIN_POSITION_SIZE_USD = 10.0   # Minimum $10 (Pacifica requirement)
+MAX_POSITION_SIZE_USD = 15.0   # Maximum $15 (conservative)
+MIN_PROFIT_THRESHOLD = 0.002   # Take profit at +0.2%
+MAX_LOSS_THRESHOLD = 0.003     # Stop loss at -0.3%
+MAX_LEVERAGE = 5.0             # Maximum 5x leverage
+```
 
-Key settings in `config.py`:
+### 4. Test Single Order (Optional)
+```bash
+python3 place_order_now.py
+```
+This places one test order to verify everything works.
 
-- `MAX_POSITION_SIZE_USD`: Maximum position size (default: $100)
-- `TRADE_FREQUENCY_SECONDS`: Time between trades (default: 30s)
-- `MIN_PROFIT_THRESHOLD`: Minimum profit to close position (default: 0.05%)
-- `MAX_LOSS_THRESHOLD`: Maximum loss before stop-loss (default: 0.1%)
-- `TRADING_SYMBOLS`: Symbols to trade (SOL-USD, BTC-USD, ETH-USD)
+### 5. Start Live Trading
+```bash
+python3 live_bot.py
+```
 
-## Strategies
-
-### 1. Volume Farming Strategy
-- Opens small positions alternating between long/short
-- Closes positions quickly for small profits or acceptable losses
-- Prioritizes volume generation over profit maximization
-
-### 2. Spread Capture Strategy
-- Monitors bid-ask spreads for opportunities
-- Places orders between bid/ask to capture spread
-- Low-risk, consistent small profits
-
-### 3. Momentum Strategy
-- Uses simple moving averages to detect momentum
-- Follows short-term price movements
-- Quick entries and exits
-
-## Risk Management
-
-- **Position Sizing**: Dynamic sizing based on account balance and confidence
-- **Stop Losses**: Automatic position closure on excessive losses
-- **Time Limits**: Maximum position hold time (2 minutes default)
-- **Daily Limits**: Maximum daily loss protection
-- **Emergency Stop**: Automatic shutdown on risk threshold breach
+Or run in background:
+```bash
+nohup python3 live_bot.py > live_bot_output.log 2>&1 &
+```
 
 ## Monitoring
 
-The bot provides real-time status updates including:
-- Total volume generated
-- Number of trades executed
-- Daily and total P&L
-- Win rate and drawdown metrics
-- Active positions
+### View Live Activity
+```bash
+tail -f live_bot_output.log
+```
 
-## API Integration
+### View Trading Statistics
+```bash
+python3 view_trades.py
+```
 
-Built for Pacifica.fi REST API:
-- Mainnet: `https://api.pacifica.fi/api/v1`
-- Testnet: `https://test-api.pacifica.fi/api/v1`
+Output example:
+```
+============================================================
+TRADING STATISTICS
+============================================================
+Total Trades:      3
+Winning Trades:    1
+Losing Trades:     2
+Win Rate:          33.33%
+Total P&L:         $-1.33
+Average P&L:       $-0.44
+Total Fees:        $1.28
+============================================================
+```
 
-Supports:
-- Market orders
-- Position monitoring
-- Account information
-- Real-time price data
+### Check Bot Status
+```bash
+ps aux | grep "python.*live_bot"
+```
+
+### Check Account Balance
+The bot logs balance info on startup and periodically:
+```
+💰 Balance: $145.78
+💰 Equity: $145.89
+💰 Leverage: 0.17x
+```
+
+## Configuration
+
+### Trading Parameters (`config.py`)
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| MIN_POSITION_SIZE_USD | 10.0 | Minimum position size (Pacifica requirement) |
+| MAX_POSITION_SIZE_USD | 15.0 | Maximum position size (risk limit) |
+| MIN_PROFIT_THRESHOLD | 0.002 | Take profit at +0.2% |
+| MAX_LOSS_THRESHOLD | 0.003 | Stop loss at -0.3% |
+| MAX_LEVERAGE | 5.0 | Maximum leverage allowed |
+| LOT_SIZE | 0.01 | Minimum order size increment |
+| CHECK_FREQUENCY_SECONDS | 45 | Position check interval |
+| TRADE_FREQUENCY_SECONDS | 900 | Time between new positions (15 min) |
+| MAX_POSITION_HOLD_TIME | 1800 | Maximum hold time (30 min) |
+| LONGS_ONLY | True | Only open long positions |
+
+### Trading Symbols
+- SOL - Solana
+- BTC - Bitcoin
+- ETH - Ethereum
+
+## Architecture
+
+### Core Files
+
+| File | Purpose |
+|------|---------|
+| `live_bot.py` | Main trading bot - handles all live trading |
+| `pacifica_sdk.py` | SDK wrapper for order placement with wallet signing |
+| `pacifica_bot.py` | API client for market data and account info |
+| `trade_tracker.py` | Trade logging and analytics engine |
+| `strategies.py` | Trading strategy logic |
+| `risk_manager.py` | Risk management and position validation |
+| `config.py` | Configuration settings |
+
+### Helper Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `place_order_now.py` | Test script to place single order |
+| `view_trades.py` | Display trading statistics |
+
+### Data Files
+
+| File | Purpose | Gitignored? |
+|------|---------|-------------|
+| `.env` | Private keys and secrets | ✅ Yes |
+| `trades.json` | Trade history and logs | ✅ Yes |
+| `*.log` | Log files | ✅ Yes |
+
+## API Details
+
+### Pacifica API
+```
+Base URL: https://api.pacifica.fi/api/v1
+
+GET  /book?symbol={symbol}      # Orderbook data
+GET  /price?symbol={symbol}     # Current price
+GET  /account?address={addr}    # Account information
+POST /order                     # Place order (requires signature)
+```
+
+### Order Placement
+Orders require Solana wallet signature:
+```python
+# Signature structure
+signature_header = {
+    "timestamp": int(time.time() * 1000),
+    "expiry_window": 5000,
+    "type": "create_market_order"
+}
+
+signature_payload = {
+    "symbol": "SOL",
+    "amount": "0.05",
+    "side": "bid",  # or "ask" for shorts
+    "slippage_percent": "1.0"
+}
+```
+
+## Risk Management
+
+### Position Sizing
+- All positions: $10-$15
+- Rounded to 0.01 lot size increments
+- Safety check: rejects orders >$30
+
+### Stop Loss / Take Profit
+- **Stop Loss**: Automatic close at -0.3% loss
+- **Take Profit**: Automatic close at +0.2% profit
+- **Time Limit**: Forced close after 30 minutes
+
+### Leverage Control
+- Maximum 5x leverage
+- Bot won't open new positions if at max leverage
+- Current leverage monitored on each cycle
+
+### Error Handling
+- API connection errors: retry on next cycle
+- Order failures: logged but continue trading
+- Position tracking: synced with Pacifica API
+
+## Trade Tracking
+
+All trades are logged to `trades.json`:
+```json
+{
+  "timestamp": "2025-10-06T21:15:23.604",
+  "order_id": "375064273",
+  "symbol": "SOL",
+  "side": "buy",
+  "size": 0.06,
+  "entry_price": 233.035,
+  "exit_price": 232.50,
+  "pnl": -0.0706,
+  "pnl_pct": -0.0033,
+  "fees": 0.0164,
+  "status": "closed",
+  "exit_reason": "Stop loss: -0.3315%",
+  "notes": "Live bot - bid order"
+}
+```
+
+## Performance Metrics
+
+Current statistics (updated 2025-10-06):
+- **Total Trades**: 3 closed, 1 open
+- **Win Rate**: 0% (early testing phase)
+- **Total P&L**: -$1.33 (mostly fees and initial bug)
+- **Average Loss**: -$0.44
+- **Largest Loss**: -$1.24 (initial bug, now fixed)
 
 ## Safety Features
 
-- **No Self-Trading**: Designed to avoid patterns flagged as manipulation
-- **Organic Activity**: Mimics natural trading behavior
-- **Rate Limiting**: Respects API rate limits
-- **Error Handling**: Robust error recovery
+### Code Safety
+- ✅ Position size validation before every order
+- ✅ Safety check prevents orders >2x max size
+- ✅ Leverage limits enforced
+- ✅ Stop losses on all positions
 
-## Volume Optimization
+### Operational Safety
+- ✅ Private keys in `.env` (gitignored)
+- ✅ Ed25519 cryptographic signatures
+- ✅ API errors handled gracefully
+- ✅ Comprehensive logging
 
-The bot is specifically optimized for Pacifica's points program:
-- Maximizes legitimate trading volume
-- Avoids patterns that don't earn points
-- Balances volume generation with profitability
-- Designed for sustained operation
+### Risk Limits
+- ✅ Max position: $15 (small account protection)
+- ✅ Max leverage: 5x
+- ✅ Max hold time: 30 minutes
+- ✅ Stop loss: -0.3%
+
+## Troubleshooting
+
+### Bot Won't Start
+```bash
+# Check if .env exists
+ls -la .env
+
+# Verify Python version (requires 3.9+)
+python3 --version
+
+# Check dependencies
+pip list | grep -E "aiohttp|solders|base58"
+```
+
+### Orders Failing
+Common issues:
+1. **Not Multiple of Lot Size**: Orders must be 0.01 increments
+2. **Below Minimum**: Orders must be ≥$10
+3. **API Connection**: Check network connection
+4. **Insufficient Balance**: Check account balance
+
+### Bot Stopped
+```bash
+# Check if running
+ps aux | grep "python.*live_bot"
+
+# View recent logs
+tail -50 live_bot_output.log
+
+# Restart
+python3 live_bot.py
+```
+
+## Development
+
+### Adding New Features
+1. Read `CLAUDE.md` for project context
+2. Check `PROGRESS.md` for development history
+3. Test changes with `place_order_now.py` first
+4. Update documentation
+5. Commit with descriptive message
+
+### Testing
+```bash
+# Test single order
+python3 place_order_now.py
+
+# View current positions
+python3 -c "from pacifica_bot import *; import asyncio; asyncio.run(check_positions())"
+
+# Check trade stats
+python3 view_trades.py
+```
+
+## Documentation
+
+- **CLAUDE.md**: Comprehensive guide for AI development
+- **PROGRESS.md**: Complete development history and lessons learned
+- **SETUP.md**: Original setup instructions
+- **README.md**: This file - user-facing documentation
+
+## Repository
+
+- **GitHub**: github.com/0xRhota/pacifica-trading-bot
+- **Branch**: main
+- **Account**: 8saejVsbEBraGvxbJGxrosv4QKMfR2i8f59GFAnMXfMc
 
 ## Legal Disclaimer
 
-This bot is for educational purposes. Trading involves risk of loss. Users are responsible for compliance with platform terms of service and applicable regulations.
+⚠️ **Important**: This bot trades with real money on live markets.
 
-## Support
+- **Risk of Loss**: Trading cryptocurrencies involves substantial risk of loss
+- **No Guarantees**: Past performance does not guarantee future results
+- **Your Responsibility**: You are solely responsible for your trading decisions
+- **Compliance**: Ensure compliance with all applicable laws and regulations
+- **Platform Terms**: Use must comply with Pacifica.fi terms of service
 
-For issues or questions, check the logs in `trading_bot.log` for detailed operation information.
+## License
+
+This project is for educational purposes. Use at your own risk.
+
+---
+
+**Status**: 🟢 LIVE TRADING
+**Last Updated**: 2025-10-06
+**Bot Version**: 1.0.0
