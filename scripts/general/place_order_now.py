@@ -5,8 +5,11 @@ Place test order immediately (no confirmation prompt)
 
 import asyncio
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from dotenv import load_dotenv
-from pacifica_sdk import PacificaSDK
+from dexes.pacifica.pacifica_sdk import PacificaSDK
 from pacifica_bot import PacificaAPI, TradingConfig
 from config import BotConfig
 

@@ -134,6 +134,43 @@ class PacificaSDK:
                 "success": False
             }
 
+    def close_position(self, symbol: str) -> Dict:
+        """
+        Close an open position by placing opposite market order
+
+        Args:
+            symbol: Trading symbol to close
+
+        Returns:
+            API response dict
+        """
+        # Get current position
+        positions = self.get_positions()
+        if not positions or 'data' not in positions:
+            return {"success": False, "error": "Failed to get positions"}
+
+        # Find position for symbol
+        position_size = 0
+        for pos in positions.get('data', []):
+            if pos.get('symbol') == symbol:
+                position_size = float(pos.get('position', 0))
+                break
+
+        if position_size == 0:
+            return {"success": False, "error": f"No open position for {symbol}"}
+
+        # Determine opposite side
+        side = "ask" if position_size > 0 else "bid"
+        amount = str(abs(position_size))
+
+        # Place opposite market order to close
+        return self.create_market_order(
+            symbol=symbol,
+            side=side,
+            amount=amount,
+            reduce_only=True
+        )
+
     def get_account_address(self) -> str:
         """Get the account's public address"""
         return self.public_key

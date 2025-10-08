@@ -15,10 +15,11 @@ from datetime import datetime
 from dotenv import load_dotenv
 
 from pacifica_bot import PacificaAPI, TradingConfig
-from pacifica_sdk import PacificaSDK
+from dexes.pacifica.pacifica_sdk import PacificaSDK
 from risk_manager import RiskManager
 from trade_tracker import tracker
 from config import BotConfig
+from strategies.long_short import LongShortStrategy
 
 # Load environment
 load_dotenv()
@@ -37,11 +38,12 @@ logger = logging.getLogger(__name__)
 class LiveTradingBot:
     """Live trading bot with SDK integration"""
 
-    def __init__(self, sdk: PacificaSDK, config: TradingConfig):
+    def __init__(self, sdk: PacificaSDK, config: TradingConfig, strategy=None):
         self.sdk = sdk
         self.config = config
         self.api = PacificaAPI(config)
         self.risk_manager = RiskManager(BotConfig)
+        self.strategy = strategy or LongShortStrategy()
         self.open_positions = {}  # symbol -> order_id
         self.last_trade_time = 0
         self.running = False
@@ -50,6 +52,7 @@ class LiveTradingBot:
         """Start live trading"""
         logger.info("🔴 STARTING LIVE TRADING BOT")
         logger.info(f"⚠️  THIS WILL PLACE REAL ORDERS WITH REAL MONEY")
+        logger.info(f"🎯 Strategy: {self.strategy.__class__.__name__}")
         logger.info(f"Check frequency: {BotConfig.CHECK_FREQUENCY_SECONDS}s")
         logger.info(f"Trade frequency: {BotConfig.TRADE_FREQUENCY_SECONDS}s ({BotConfig.TRADE_FREQUENCY_SECONDS/60:.0f} min)")
         logger.info(f"Position sizes: ${BotConfig.MIN_POSITION_SIZE_USD}-${BotConfig.MAX_POSITION_SIZE_USD}")
@@ -148,19 +151,10 @@ class LiveTradingBot:
                 else:
                     pnl_pct = (entry_price - current_price) / entry_price
 
-                # Check if should close
-                should_close = False
-                close_reason = ""
-
-                if pnl_pct >= BotConfig.MIN_PROFIT_THRESHOLD:
-                    should_close = True
-                    close_reason = f"Take profit: {pnl_pct:.4%}"
-                elif pnl_pct <= -BotConfig.MAX_LOSS_THRESHOLD:
-                    should_close = True
-                    close_reason = f"Stop loss: {pnl_pct:.4%}"
-                elif time_held > BotConfig.MAX_POSITION_HOLD_TIME:
-                    should_close = True
-                    close_reason = f"Time limit: {time_held/60:.1f}min"
+                # Check if should close using strategy
+                should_close, close_reason = self.strategy.should_close_position(
+                    trade, current_price, time_held
+                )
 
                 if should_close:
                     await self._close_position(symbol, order_id, current_price, close_reason)
@@ -206,21 +200,19 @@ class LiveTradingBot:
 
             # Get orderbook
             orderbook = await self.api.get_orderbook(symbol)
-            if not orderbook or "bids" not in orderbook:
+            if not orderbook:
                 return
 
-            # Calculate position size (round up to meet $10 minimum)
-            position_value = random.uniform(BotConfig.MIN_POSITION_SIZE_USD, BotConfig.MAX_POSITION_SIZE_USD)
-            size = position_value / current_price
+            # Use strategy to determine if should open and which direction
+            should_open, side = self.strategy.should_open_position(
+                symbol, current_price, orderbook, account
+            )
 
-            # Some tokens require whole numbers (lot size 1), others allow decimals
-            # PENGU, XPL, ASTER require whole numbers based on API errors
-            whole_number_tokens = ["PENGU", "XPL", "ASTER", "BTC"]
-            if symbol in whole_number_tokens:
-                size = math.ceil(size)  # Round up to whole number
-            else:
-                size = math.ceil(size / BotConfig.LOT_SIZE) * BotConfig.LOT_SIZE
+            if not should_open or not side:
+                return
 
+            # Calculate position size using strategy
+            size = self.strategy.get_position_size(symbol, current_price, account)
             actual_value = size * current_price
 
             # Verify meets minimum
@@ -232,8 +224,6 @@ class LiveTradingBot:
             if actual_value > BotConfig.MAX_POSITION_SIZE_USD * 2:
                 logger.error(f"❌ Position too large: ${actual_value:.2f} > ${BotConfig.MAX_POSITION_SIZE_USD * 2:.2f}")
                 return
-
-            side = "bid"  # Longs only
 
             logger.info(f"🟢 Opening {side} position for {symbol}")
             logger.info(f"   Price: ${current_price:.2f}, Size: {size:.6f}, Value: ${actual_value:.2f}")

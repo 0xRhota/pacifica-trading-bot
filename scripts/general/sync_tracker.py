@@ -5,7 +5,10 @@ This fixes stale "open" positions in the tracker
 """
 
 import os
-from pacifica_sdk import PacificaSDK
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from dexes.pacifica.pacifica_sdk import PacificaSDK
 from config import BotConfig
 from trade_tracker import tracker
 

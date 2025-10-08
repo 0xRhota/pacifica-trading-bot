@@ -1,16 +1,7 @@
-# Environment variables (CONTAINS PRIVATE KEYS - NEVER COMMIT!)
-.env
-.env.local
-.env.*.local
-.env.*
-
 # Logs
 *.log
 logs/
-
-# Trade data
-trades.json
-trades.csv
+*.log.*
 
 # Python
 __pycache__/
@@ -18,22 +9,41 @@ __pycache__/
 *$py.class
 *.so
 .Python
-venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Environments
+.env
+.venv
 env/
+venv/
 ENV/
+env.bak/
+venv.bak/
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# OS
+*~
 .DS_Store
-Thumbs.db
 
-# Archive
-archive/
-
-# Research credentials
-research/**/.env
+# Secrets
+*secret*
+*key*.json
+*key*.txt
+credentials.*
