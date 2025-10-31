@@ -153,22 +153,17 @@ class LongShortStrategy(BaseStrategy):
             pnl_pct = (entry_price - current_price) / entry_price
 
         # Stop loss (always check first)
-        if pnl_pct <= -BotConfig.MAX_LOSS_THRESHOLD:
+        if pnl_pct <= -BotConfig.STOP_LOSS:
             return True, f"Stop loss: {pnl_pct:.4%}"
 
         # Ladder take-profit system
-        if BotConfig.USE_LADDER_TP:
-            # Check which ladder level we've hit
-            for level_pct in reversed(BotConfig.LADDER_TP_LEVELS):  # Check highest first
-                if pnl_pct >= level_pct:
-                    return True, f"Ladder TP L{BotConfig.LADDER_TP_LEVELS.index(level_pct)+1}: {pnl_pct:.4%}"
-        else:
-            # Simple take-profit (legacy)
-            if pnl_pct >= BotConfig.MIN_PROFIT_THRESHOLD:
-                return True, f"Take profit: {pnl_pct:.4%}"
+        # Check which ladder level we've hit
+        for level_pct in reversed(BotConfig.TAKE_PROFIT_LEVELS):  # Check highest first
+            if pnl_pct >= level_pct:
+                return True, f"Ladder TP L{BotConfig.TAKE_PROFIT_LEVELS.index(level_pct)+1}: {pnl_pct:.4%}"
 
         # Time limit (only if configured)
-        if BotConfig.MAX_POSITION_HOLD_TIME is not None and time_held > BotConfig.MAX_POSITION_HOLD_TIME:
+        if BotConfig.MAX_HOLD_TIME_SEC is not None and time_held > BotConfig.MAX_HOLD_TIME_SEC:
             return True, f"Time limit: {time_held/60:.1f}min"
 
         return False, ""
@@ -183,8 +178,8 @@ class LongShortStrategy(BaseStrategy):
         """
         # Random position value
         position_value = random.uniform(
-            BotConfig.MIN_POSITION_SIZE_USD,
-            BotConfig.MAX_POSITION_SIZE_USD
+            BotConfig.MIN_POSITION_USD,
+            BotConfig.MAX_POSITION_USD
         )
 
         size = position_value / current_price
@@ -198,6 +193,7 @@ class LongShortStrategy(BaseStrategy):
             size = math.ceil(size / 0.001) * 0.001
         else:
             # SOL, ETH use 0.01 lot size
-            size = math.ceil(size / BotConfig.LOT_SIZE) * BotConfig.LOT_SIZE
+            lot_size = BotConfig.LOT_SIZES.get(symbol, 0.01)
+            size = math.ceil(size / lot_size) * lot_size
 
         return size

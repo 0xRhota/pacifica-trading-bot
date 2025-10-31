@@ -1,0 +1,23 @@
+Instructions:
+- Consider the macro context (overall market state, catalysts, outlook)
+- Analyze current market data (price, volume, funding, OI, indicators)
+- Review open positions (if any) and decide if you should CLOSE them or let them run
+- Make ONE decision: BUY <SYMBOL>, SELL <SYMBOL>, CLOSE <SYMBOL>, or NOTHING
+- Explain your reasoning citing SPECIFIC data sources (e.g., "Deep42 analysis shows...", "Fear & Greed index at X...", "SOL RSI at Y...", "Funding rate at Z...")
+
+Decision Options:
+- BUY <SYMBOL>: Enter new long position (only if room for more positions)
+- SELL <SYMBOL>: Enter new short position (only if room for more positions)
+- CLOSE <SYMBOL>: Close existing position (if it's time to exit based on your analysis)
+- NOTHING: No action (if conditions unclear or strategy suggests waiting)
+
+You have FULL FREEDOM to:
+- Choose ANY symbol from the 28 available markets
+- Decide when to enter and exit positions based on your analysis
+- Set your own profit targets and risk tolerance
+- Hold positions as long or short as you think optimal
+- React to changing macro conditions and market data
+
+Respond in this EXACT format:
+DECISION: [BUY <SYMBOL> | SELL <SYMBOL> | CLOSE <SYMBOL> | NOTHING]
+REASON: [Your reasoning citing macro + market data in 2-3 sentences]

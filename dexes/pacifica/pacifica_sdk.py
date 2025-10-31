@@ -14,17 +14,24 @@ import requests
 class PacificaSDK:
     """SDK for placing orders on Pacifica using wallet signing"""
 
-    def __init__(self, private_key: str, base_url: str = "https://api.pacifica.fi/api/v1"):
+    def __init__(self, private_key: str, account_address: str, base_url: str = "https://api.pacifica.fi/api/v1"):
         """
-        Initialize SDK with wallet private key
+        Initialize SDK with API agent key
 
         Args:
-            private_key: Base58 encoded Solana private key
+            private_key: Base58 encoded API agent private key
+            account_address: Main trading account public key
             base_url: Pacifica API base URL
         """
         self.keypair = Keypair.from_base58_string(private_key)
-        self.public_key = str(self.keypair.pubkey())
+        self.agent_public_key = str(self.keypair.pubkey())
+        self.account_address = account_address
         self.base_url = base_url
+
+    @property
+    def public_key(self):
+        """Alias for agent_public_key for backwards compatibility"""
+        return self.agent_public_key
 
     def _sort_json_keys(self, value):
         """Sort JSON keys recursively for signature consistency"""
@@ -105,9 +112,10 @@ class PacificaSDK:
         # Sign the message
         message, signature = self._sign_message(signature_header, signature_payload)
 
-        # Construct the request
+        # Construct the request (matching test_agent_order.py format)
         request_header = {
-            "account": self.public_key,
+            "account": self.account_address,  # Main account
+            "agent_wallet": self.agent_public_key,  # Agent wallet public key
             "signature": signature,
             "timestamp": signature_header["timestamp"],
             "expiry_window": signature_header["expiry_window"],
@@ -151,9 +159,14 @@ class PacificaSDK:
 
         # Find position for symbol
         position_size = 0
+        position_side = None
         for pos in positions.get('data', []):
             if pos.get('symbol') == symbol:
-                position_size = float(pos.get('position', 0))
+                amount = float(pos.get('amount', 0))
+                side = pos.get('side', '')
+                # Convert to signed position (positive = long, negative = short)
+                position_size = amount if side == 'bid' else -amount
+                position_side = side
                 break
 
         if position_size == 0:
@@ -172,8 +185,8 @@ class PacificaSDK:
         )
 
     def get_account_address(self) -> str:
-        """Get the account's public address"""
-        return self.public_key
+        """Get the main trading account's public address"""
+        return self.account_address
 
     def get_positions(self) -> Dict:
         """
@@ -182,7 +195,7 @@ class PacificaSDK:
         Returns:
             API response dict with positions data
         """
-        url = f"{self.base_url}/positions?account={self.public_key}"
+        url = f"{self.base_url}/positions?account={self.account_address}"
         response = requests.get(url)
 
         try:

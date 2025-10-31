@@ -1,0 +1,656 @@
+<context>
+# Overview
+Enhance the existing LLM trading bot with multi-timeframe macro context, prompt template system, and multi-bot architecture. The current bot works but uses hardcoded prompts and focuses on long-term macro trends that aren't actionable for swing trading. Users need easy prompt customization and the ability to run multiple bots with different strategies simultaneously.
+
+**Problem**: 
+1. Macro context focuses on long-term trends (e.g., "BTC dominance is 60% - high for months") which is not actionable for swing trading
+2. Prompts are hardcoded in Python strings - requires code changes to adjust strategy
+3. Can only run one bot at a time - no way to diversify strategies or A/B test
+
+**Solution**: 
+1. Multi-timeframe macro context: Daily/weekly/long-term sections with actionable metrics
+2. Template-based prompt system: Markdown files for easy editing without code changes
+3. Multi-bot architecture: Run multiple bots simultaneously with different prompt templates and configs
+
+**Target Users**: Developer/trader managing Pacifica trading bots, needs quick strategy adjustments and diversification
+
+# Core Features
+
+## 1. Multi-Timeframe Macro Context
+**What**: Enhance macro context fetcher to provide daily, weekly, and long-term context separately
+**Why**: Swing trading needs actionable daily/weekly metrics, not months-long trends
+**How**:
+- Use existing `_fetch_deep42_multi_analysis()` method (currently unused)
+- Fetch daily context: Events TODAY, 24h BTC dominance changes, volume spikes
+- Fetch weekly context: Events THIS WEEK, 7-day trends, momentum indicators
+- Keep long-term context as background only
+- Format with clear sections: Daily → Weekly → Long-term
+
+## 2. Prompt Template System
+**What**: Extract prompts from Python code into Markdown template files
+**Why**: Easy customization without code changes, version control, A/B testing
+**How**:
+- Create `llm_agent/prompts/` directory
+- Extract current prompt to `base.md`
+- Create variant templates: `swing_trading.md`, `aggressive.md`, `conservative.md`, `contrarian.md`
+- Modify `PromptFormatter` to load templates from files
+- Support template variables (e.g., `{{position_size}}`, `{{market_data_section}}`)
+
+## 3. Multi-Bot Architecture
+**What**: Support running multiple bots simultaneously with different configs
+**Why**: Strategy diversification, A/B testing, different risk profiles
+**How**:
+- Create `llm_agent/bot_configs/` directory with JSON config files
+- Modify `bot_llm.py` to accept `--config` parameter
+- Each bot has independent: prompt template, position limits, log file, check interval
+- Per-bot position tracking and limits
+- Support Docker Compose for multi-bot deployment
+
+# User Experience
+
+**User Persona**: Developer/trader wanting to customize strategies and run multiple bots
+
+**Key User Flows**:
+1. Edit prompt template → Markdown file, no code changes needed
+2. Create bot config → JSON file with prompt template, position size, etc.
+3. Start multiple bots → Each runs independently with different strategies
+4. Monitor bots → Separate log files per bot, view decisions per bot
+5. Swap strategies → Change config file, restart bot
+
+**UI/UX**: Command-line bots with separate log files per bot
+
+**Critical: Multi-Bot Behavior**:
+- Each bot runs independently (separate process)
+- Each bot has own prompt template (from `prompts/` directory)
+- Each bot has own position limits (per-bot max positions)
+- Each bot logs to separate file (`logs/{bot_name}.log`)
+- Total positions = sum of all bots (respects global limit)
+
+**Config File Format**:
+```json
+{
+  "bot_name": "swing_trader",
+  "prompt_template": "swing_trading",
+  "position_size": 30.0,
+  "max_positions": 3,
+  "check_interval": 300,
+  "timeframe_focus": "swing",
+  "log_file": "logs/swing_trader.log",
+  "dry_run": false
+}
+```
+
+**Running Multiple Bots**:
+```bash
+# Bot 1: Swing trading
+python3 -m llm_agent.bot_llm --config bot_configs/swing_trader.json --live &
+
+# Bot 2: Aggressive
+python3 -m llm_agent.bot_llm --config bot_configs/aggressive_bot.json --live &
+
+# Bot 3: Conservative
+python3 -m llm_agent.bot_llm --config bot_configs/conservative_bot.json --live &
+```
+
+**Log Output Format** (per bot):
+```
+[2025-10-31 11:24:21] [swing_trader] ========================================
+MACRO CONTEXT (Multi-Timeframe)
+=== DAILY CONTEXT ===
+Daily Deep42: Events TODAY...
+BTC Dominance 24h Change: +0.5%
+Volume Spikes: SOL +150%
+
+=== WEEKLY CONTEXT ===
+Weekly Deep42: Events THIS WEEK...
+BTC Dominance 7d Trend: Declining
+
+=== LONG-TERM CONTEXT ===
+Fear & Greed: 29/100 (Fear)
+
+Decision: NOTHING
+Reason: Daily context shows... [cites daily/weekly metrics]
+========================================
+```
+
+**Why This Matters**:
+- Easy prompt customization (edit markdown, not Python)
+- Quick strategy swapping (change config file)
+- Strategy diversification (multiple bots running)
+- A/B testing (compare bot performance)
+- Clear separation (each bot has own log, config, prompt)
+</context>
+
+<PRD>
+# Technical Architecture
+
+## Current System State
+
+**Existing Components** (already working):
+- `llm_agent/data/macro_fetcher.py` - Macro context fetcher (has `_fetch_deep42_multi_analysis()` but unused)
+- `llm_agent/llm/prompt_formatter.py` - Prompt formatter (hardcoded instructions string)
+- `llm_agent/bot_llm.py` - Main bot entry point (single bot only)
+- `llm_agent/data/aggregator.py` - Market data aggregator (working)
+- `llm_agent/execution/trade_executor.py` - Trade execution (working)
+
+**Issues to Fix**:
+1. Macro context only uses long-term analysis (single `_fetch_deep42_analysis()` call)
+2. Prompt hardcoded in Python string (lines 160-182 in `prompt_formatter.py`)
+3. Single bot only (no multi-bot support)
+4. No easy way to swap strategies
+
+**Target Architecture**:
+```
+llm_agent/
+├── prompts/                         # NEW: Prompt templates
+│   ├── base.md                      # Current prompt
+│   ├── swing_trading.md            # Daily/weekly focus
+│   ├── aggressive.md                # More aggressive entries
+│   ├── conservative.md             # Capital preservation
+│   └── contrarian.md                # Contrarian entries
+├── bot_configs/                     # NEW: Bot configs
+│   ├── swing_trader.json
+│   ├── aggressive_bot.json
+│   └── conservative_bot.json
+├── data/
+│   └── macro_fetcher.py             # MODIFY: Use multi-timeframe analysis
+├── llm/
+│   └── prompt_formatter.py          # MODIFY: Load templates from files
+└── bot_llm.py                       # MODIFY: Accept --config parameter
+```
+
+## System Components
+
+### 1. Enhanced Macro Context Fetcher
+
+**File**: `llm_agent/data/macro_fetcher.py`
+
+**Changes Required**:
+- Modify `get_macro_context()` to call `_fetch_deep42_multi_analysis()` instead of single analysis
+- Add daily BTC dominance calculation (24h change)
+- Add weekly BTC dominance calculation (7d trend)
+- Add volume spike detection (24h volume changes >50%)
+- Add funding rate change tracking (24h delta)
+- Format with sections: Daily → Weekly → Long-term
+
+**New Methods**:
+- `_calculate_daily_metrics()` - BTC dominance 24h change, volume spikes, funding changes
+- `_calculate_weekly_metrics()` - BTC dominance 7d trend, volume trends, momentum
+- `_format_multi_timeframe_context()` - Format with daily/weekly/long-term sections
+
+**Data Sources**:
+- Deep42 API: Daily, weekly, market state queries (already has method)
+- CoinGecko API: BTC dominance historical data (24h and 7d)
+- Pacifica API: Volume and funding rate data for change calculations
+
+### 2. Prompt Template System
+
+**File**: `llm_agent/llm/prompt_formatter.py`
+
+**Changes Required**:
+- Add `__init__(template_name)` parameter to load template file
+- Add `_load_template()` method to read Markdown file
+- Add `_replace_variables()` method for template variable substitution
+- Modify `format_trading_prompt()` to use template instead of hardcoded string
+
+**Template Variables**:
+- `{{deep42_daily_context}}` - Daily Deep42 analysis
+- `{{deep42_weekly_context}}` - Weekly Deep42 analysis
+- `{{deep42_market_state}}` - Long-term market state
+- `{{market_data_section}}` - Formatted market table
+- `{{positions_section}}` - Open positions
+- `{{position_size}}` - Position size from config
+- `{{max_positions}}` - Max positions from config
+
+**Template File Format** (`llm_agent/prompts/swing_trading.md`):
+```markdown
+# Trading Instructions - Swing Trading Bot
+
+## Timeframe Focus: Daily/Weekly (Swing Trading)
+
+{{deep42_daily_context}}
+
+{{deep42_weekly_context}}
+
+{{deep42_market_state}}
+
+{{market_data_section}}
+
+{{positions_section}}
+
+## Decision Guidelines
+
+**Your Trading Style: Swing Trading (Daily/Weekly Timeframes)**
+
+Focus on:
+- **Daily context**: Events happening TODAY, 24h price movements, volume spikes
+- **Weekly context**: Events THIS WEEK, 7-day trends, momentum indicators
+- **Long-term context**: Background only - don't let months-long trends prevent action
+
+Key Metrics for Swing Trading:
+- Daily volume changes (>50% increase = strong signal)
+- BTC dominance daily changes (not absolute value)
+- Funding rate 24h changes
+- Price momentum (24h and 7d)
+
+Decision Making:
+- Consider daily/weekly context FIRST
+- Long-term trends are background context only
+- Don't wait for perfect setups - swing trading means capturing short-term moves
+- BTC dominance "high for months" is not actionable - focus on daily/weekly changes
+
+## Risk Management
+
+- Maximum position size: ${{position_size}} per trade
+- Maximum positions: {{max_positions}} open at once
+- Prefer trades with clear daily/weekly catalysts
+- Exit when daily/weekly context changes
+
+## Decision Format
+
+DECISION: [BUY <SYMBOL> | SELL <SYMBOL> | CLOSE <SYMBOL> | NOTHING]
+REASON: [Your reasoning citing DAILY/WEEKLY context + market data in 2-3 sentences]
+```
+
+### 3. Multi-Bot Configuration System
+
+**File**: `llm_agent/bot_configs/*.json`
+
+**Config Format**:
+```json
+{
+  "bot_name": "swing_trader",
+  "prompt_template": "swing_trading",
+  "position_size": 30.0,
+  "max_positions": 3,
+  "check_interval": 300,
+  "timeframe_focus": "swing",
+  "log_file": "logs/swing_trader.log",
+  "dry_run": false,
+  "description": "Swing trading bot focused on daily/weekly timeframes"
+}
+```
+
+**Config Fields**:
+- `bot_name`: Unique identifier for bot
+- `prompt_template`: Template file name (without .md extension)
+- `position_size`: USD per trade
+- `max_positions`: Max open positions for this bot
+- `check_interval`: Seconds between decision cycles
+- `timeframe_focus`: "swing" (daily/weekly), "long_term", or "both"
+- `log_file`: Log file path (relative to project root)
+- `dry_run`: Boolean for dry-run mode
+
+### 4. Enhanced Bot Entry Point
+
+**File**: `llm_agent/bot_llm.py`
+
+**Changes Required**:
+- Add `--config` parameter to accept config file path
+- Load config JSON file
+- Initialize bot with config values
+- Set bot name in logger
+- Use config-specified log file
+- Pass prompt template name to `PromptFormatter`
+
+**Command Line Interface**:
+```bash
+# Single bot with config file
+python3 -m llm_agent.bot_llm --config bot_configs/swing_trader.json --live
+
+# Legacy mode (still supported)
+python3 -m llm_agent.bot_llm --live --interval 300 --position-size 30
+```
+
+### 5. Per-Bot Position Management
+
+**File**: `llm_agent/execution/trade_executor.py`
+
+**Changes Required**:
+- Add `bot_name` parameter to `TradeExecutor`
+- Include bot_name in trade tracking
+- Respect per-bot position limits
+- Track global position limit across all bots
+
+**Position Tracking**:
+- Each bot tracks its own positions separately
+- Trade tracker includes `bot_name` field
+- Global limit: Sum of all bot positions must respect global max
+
+## Data Models
+
+### BotConfig
+```python
+{
+    "bot_name": str,              # Unique identifier
+    "prompt_template": str,       # Template file name
+    "position_size": float,       # USD per trade
+    "max_positions": int,         # Per-bot limit
+    "check_interval": int,        # Seconds
+    "timeframe_focus": str,       # "swing", "long_term", "both"
+    "log_file": str,             # Log file path
+    "dry_run": bool              # Dry-run mode
+}
+```
+
+### MultiTimeframeMacroContext
+```python
+{
+    "daily": {
+        "deep42_analysis": str,
+        "btc_dom_change_24h": float,      # Percentage change
+        "volume_spikes": List[Dict],       # [{symbol: "SOL", change: +150%}]
+        "funding_changes": Dict,          # {symbol: change_24h}
+        "price_action": Dict              # {symbol: change_24h}
+    },
+    "weekly": {
+        "deep42_analysis": str,
+        "btc_dom_trend_7d": str,          # "rising", "falling", "stable"
+        "volume_trend": str,              # "increasing", "decreasing"
+        "funding_trend": str,             # "mostly_positive", "mostly_negative"
+        "momentum_indicators": List[str]  # Symbols showing momentum
+    },
+    "long_term": {
+        "deep42_analysis": str,
+        "fear_greed_index": int,          # 0-100
+        "btc_dominance": float,           # Absolute value
+        "market_cap_change_24h": float,   # Percentage
+        "overall_sentiment": str          # "bullish", "bearish", "neutral"
+    }
+}
+```
+
+## APIs and Integrations
+
+**External APIs** (no changes):
+- Deep42 API: Multi-timeframe queries (already implemented)
+- CoinGecko API: BTC dominance historical data (need 24h and 7d)
+- Pacifica API: Volume and funding rate data (already fetching)
+
+**Internal Integrations**:
+- Existing `MacroContextFetcher` (enhance, don't replace)
+- Existing `PromptFormatter` (enhance, don't replace)
+- Existing `LLMTradingAgent` (minimal changes)
+- Existing `TradeExecutor` (add bot_name tracking)
+
+## Infrastructure Requirements
+
+**Runtime**:
+- Python 3.9+ (no change)
+- Existing dependencies (no new dependencies)
+
+**File System**:
+- `llm_agent/prompts/` directory (create)
+- `llm_agent/bot_configs/` directory (create)
+- Per-bot log files in `logs/` directory
+
+**Storage**:
+- Template files: Markdown files (version controlled)
+- Config files: JSON files (version controlled)
+- Logs: Separate files per bot (gitignored)
+
+# Development Roadmap
+
+## Phase 1: Multi-Timeframe Macro Context (Priority: HIGH)
+
+**Goal**: Make macro context actionable for swing trading
+
+**Scope**:
+1. Modify `MacroContextFetcher.get_macro_context()` to use `_fetch_deep42_multi_analysis()`
+2. Add `_calculate_daily_metrics()` method:
+   - Fetch BTC dominance from CoinGecko (current and 24h ago)
+   - Calculate 24h BTC dominance change
+   - Identify volume spikes (>50% increase) from market data
+   - Calculate funding rate 24h changes from Pacifica data
+   - Track 24h price changes for major tokens
+3. Add `_calculate_weekly_metrics()` method:
+   - Fetch BTC dominance 7 days ago from CoinGecko
+   - Calculate 7d trend (rising/falling/stable)
+   - Analyze volume trends (increasing/decreasing)
+   - Analyze funding rate trends (mostly positive/negative)
+   - Identify momentum indicators (RSI trends)
+4. Modify `_format_macro_context()` to include daily/weekly/long-term sections
+5. Update prompt to emphasize daily/weekly context for swing trading
+
+**Deliverable**: Macro context with daily/weekly/long-term sections, actionable for swing trading
+
+**Testing**:
+- Verify daily metrics are calculated correctly
+- Verify weekly metrics are calculated correctly
+- Verify format includes all three sections
+- Test with swing trading prompt template
+
+## Phase 2: Prompt Template System (Priority: HIGH)
+
+**Goal**: Extract prompts from Python code into Markdown template files
+
+**Scope**:
+1. Create `llm_agent/prompts/` directory
+2. Extract current prompt from `prompt_formatter.py` to `base.md`
+3. Create `swing_trading.md` template (emphasizes daily/weekly context)
+4. Create variant templates:
+   - `aggressive.md` - More aggressive entries
+   - `conservative.md` - Capital preservation
+   - `contrarian.md` - Contrarian entries
+5. Modify `PromptFormatter.__init__()` to accept `template_name` parameter
+6. Add `_load_template()` method to read Markdown file
+7. Add `_replace_variables()` method for template variable substitution
+8. Modify `format_trading_prompt()` to use template instead of hardcoded string
+9. Update `LLMTradingAgent` to pass template name to `PromptFormatter`
+
+**Template Variables to Support**:
+- `{{deep42_daily_context}}` - Daily Deep42 analysis
+- `{{deep42_weekly_context}}` - Weekly Deep42 analysis
+- `{{deep42_market_state}}` - Long-term market state
+- `{{market_data_section}}` - Formatted market table
+- `{{positions_section}}` - Open positions
+- `{{position_size}}` - Position size from config
+- `{{max_positions}}` - Max positions from config
+
+**Deliverable**: Prompt template system with multiple templates, easy editing without code changes
+
+**Testing**:
+- Verify templates load correctly
+- Verify variable substitution works
+- Test with each template variant
+- Verify prompt format matches current hardcoded version
+
+## Phase 3: Multi-Bot Architecture (Priority: MEDIUM)
+
+**Goal**: Support running multiple bots simultaneously with different configs
+
+**Scope**:
+1. Create `llm_agent/bot_configs/` directory
+2. Create example config files:
+   - `swing_trader.json` - Swing trading bot
+   - `aggressive_bot.json` - Aggressive bot
+   - `conservative_bot.json` - Conservative bot
+3. Modify `bot_llm.py` to accept `--config` parameter
+4. Add config loading logic (JSON file parsing)
+5. Initialize bot with config values:
+   - Bot name for logging
+   - Prompt template name
+   - Position size
+   - Max positions
+   - Check interval
+   - Log file path
+6. Modify logger to use bot-specific log file
+7. Add bot_name to trade tracking
+8. Update `TradeExecutor` to respect per-bot position limits
+9. Add global position limit check (sum of all bots)
+
+**Deliverable**: Multi-bot system with config files, per-bot logging and position tracking
+
+**Testing**:
+- Verify config files load correctly
+- Verify multiple bots can run simultaneously
+- Verify each bot uses correct prompt template
+- Verify per-bot position limits work
+- Verify global position limit works
+- Test Docker Compose deployment
+
+## Phase 4: Documentation & Examples (Priority: LOW)
+
+**Goal**: Document the new system for users
+
+**Scope**:
+1. Update `docs/PROMPT_CUSTOMIZATION.md` with template system
+2. Create `docs/MULTI_BOT_SETUP.md` with setup guide
+3. Create example prompt templates with comments
+4. Create example bot configs with comments
+5. Update `USER_REFERENCE.md` with new commands
+6. Update `CLAUDE.md` with new architecture
+
+**Deliverable**: Complete documentation for prompt customization and multi-bot setup
+
+# Logical Dependency Chain
+
+**Foundation (Must Build First)**:
+1. Multi-timeframe macro context → Needed for swing trading prompts
+2. Prompt template system → Needed for multi-bot templates
+3. Multi-bot architecture → Depends on templates
+
+**Core Functionality**:
+4. Enhanced macro fetcher → Provides daily/weekly data
+5. Template loader → Loads prompt templates
+6. Config system → Manages bot configurations
+
+**Execution**:
+7. Bot entry point → Starts bots with configs
+8. Per-bot tracking → Manages positions per bot
+9. Multi-bot deployment → Runs multiple bots
+
+# Risks and Mitigations
+
+## Technical Challenges
+
+**Risk**: CoinGecko API may not have historical BTC dominance data easily accessible
+**Mitigation**:
+- Check CoinGecko API docs for historical data endpoint
+- If not available, calculate from daily snapshots (store last 7 days)
+- Fallback: Show only current dominance, skip 24h/7d changes
+
+**Risk**: Template variable substitution may be complex
+**Mitigation**:
+- Use simple string replacement (Python `.format()` or `str.replace()`)
+- Keep variables simple and clearly documented
+- Test each template variable substitution
+
+**Risk**: Multiple bots may conflict on position limits
+**Mitigation**:
+- Per-bot position limits are independent
+- Global limit check: Sum of all bot positions <= global max
+- Log warnings if global limit exceeded
+
+**Risk**: Template file reading may fail
+**Mitigation**:
+- Validate template file exists on startup
+- Fallback to hardcoded prompt if template missing
+- Log errors clearly
+
+# MVP Definition
+
+**Core MVP** (Phases 1-2):
+- Multi-timeframe macro context with daily/weekly/long-term sections
+- Prompt template system with at least 3 templates (base, swing_trading, aggressive)
+- Easy template editing (Markdown files)
+- Template variable substitution
+
+**Enhanced MVP** (Phase 3):
+- Multi-bot architecture with config files
+- Per-bot logging and position tracking
+- Ability to run 2-3 bots simultaneously
+
+**What's NOT in MVP**:
+- More than 5 prompt templates (can add more later)
+- Advanced template features (loops, conditionals)
+- Bot orchestration UI (command-line only)
+
+**Success Criteria**:
+- Macro context includes daily/weekly sections with actionable metrics
+- Can edit prompt template without touching Python code
+- Can swap prompt templates by changing config file
+- Can run 2 bots simultaneously with different templates
+- Each bot makes independent decisions
+- Per-bot logs are separate and readable
+
+# Resource Constraints
+
+**Development Time**:
+- Phase 1 (Multi-timeframe macro): 1-2 days
+- Phase 2 (Template system): 1-2 days
+- Phase 3 (Multi-bot): 1-2 days
+- MVP total: ~4-6 days
+
+**API Costs**:
+- Deep42 API: Same as current (3 queries instead of 1 per refresh, but cached 12h)
+- CoinGecko API: Additional historical queries (free tier sufficient)
+- No additional costs
+
+**Storage**:
+- Template files: <10KB each (5 templates = 50KB)
+- Config files: <1KB each (3 configs = 3KB)
+- Logs: Per-bot (same as current, just split)
+
+# Integration Points
+
+**Existing Code to Modify**:
+- `llm_agent/data/macro_fetcher.py` - Enhance macro context
+- `llm_agent/llm/prompt_formatter.py` - Load templates
+- `llm_agent/bot_llm.py` - Accept config parameter
+- `llm_agent/execution/trade_executor.py` - Add bot_name tracking
+
+**New Code to Create**:
+- `llm_agent/prompts/*.md` - Template files
+- `llm_agent/bot_configs/*.json` - Config files
+- Config loading logic in `bot_llm.py`
+
+**No Breaking Changes**:
+- Legacy mode still supported (no --config parameter)
+- Existing prompts still work (base.md matches current)
+- Existing bot continues working
+
+# Deployment
+
+**Local Testing**:
+```bash
+# Test multi-timeframe macro context
+python3 -m llm_agent.bot_llm --dry-run --once
+
+# Test template system
+python3 -m llm_agent.bot_llm --config bot_configs/swing_trader.json --dry-run --once
+
+# Test multi-bot
+python3 -m llm_agent.bot_llm --config bot_configs/swing_trader.json --live &
+python3 -m llm_agent.bot_llm --config bot_configs/aggressive_bot.json --live &
+```
+
+**Docker Deployment**:
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  swing_trader:
+    build: .
+    command: python -m llm_agent.bot_llm --config bot_configs/swing_trader.json --live
+    env_file: .env
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  aggressive_bot:
+    build: .
+    command: python -m llm_agent.bot_llm --config bot_configs/aggressive_bot.json --live
+    env_file: .env
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+```
+
+**Simple Deployment**:
+- Template files: Commit to git (version controlled)
+- Config files: Commit to git (version controlled)
+- Logs: Gitignored (per-bot log files)
+</PRD>
+

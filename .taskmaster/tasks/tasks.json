@@ -1,0 +1,214 @@
+{
+  "master": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "Phase 0: Pre-Development API Validation and Environment Setup",
+        "description": "Validate all data sources, APIs, and dependencies before implementing the LLM trading bot",
+        "details": "Test Pacifica /info endpoint for all 28 markets, validate Cambrian batch endpoints, test pandas_ta library, create token address mapping, obtain DeepSeek API key, document API response formats and limitations. Create .env.example template and update .gitignore for proper secret management.",
+        "testStrategy": "Create validation scripts that test each API endpoint with sample data and verify response formats. Validate all dependencies can be imported successfully.",
+        "priority": "high",
+        "dependencies": [],
+        "status": "done",
+        "subtasks": [],
+        "complexity": 4,
+        "recommendedSubtasks": 5,
+        "expansionPrompt": "Break down this validation task into specific API testing components: Pacifica /info endpoint validation for all 28 markets, Cambrian batch endpoint testing, pandas_ta library validation, token address mapping creation, and environment setup with proper secret management.",
+        "updatedAt": "2025-10-30T14:44:45.642Z"
+      },
+      {
+        "id": 2,
+        "title": "Repository Reorganization: Create LLM Agent Package Structure",
+        "description": "Reorganize codebase to separate legacy rule-based bots from new LLM agent system",
+        "details": "Create llm_agent/ package with data/, agent/, execution/ subdirectories. Move existing bots to legacy/ folder. Create bot_llm.py main entry point. Update imports and add __init__.py files. Create tests/ directory structure. Update README.md with new organization.",
+        "testStrategy": "Verify legacy bots still work after move. Test that new package structure can be imported. Run existing tests to ensure no breaking changes.",
+        "priority": "medium",
+        "dependencies": [
+          "1"
+        ],
+        "status": "done",
+        "subtasks": [],
+        "complexity": 3,
+        "recommendedSubtasks": 4,
+        "expansionPrompt": "Split this reorganization into logical steps: create new package structure with proper directories, move legacy bots safely, update all import statements and dependencies, and verify existing functionality still works after the move.",
+        "updatedAt": "2025-10-30T14:56:30.062Z"
+      },
+      {
+        "id": 3,
+        "title": "Implement Multi-Source Data Pipeline",
+        "description": "Create data fetchers for Pacifica, Cambrian, OI sources, and macro context with proper error handling",
+        "details": "Implement PacificaDataFetcher (/kline, /info), CambrianDataFetcher (/token-details), OIDataFetcher (Binance + HyperLiquid), MacroContextFetcher (Deep42, CoinGecko, Fear & Greed). Add retry logic, rate limiting, data validation, and caching. Create MarketDataAggregator.fetch_all_markets() orchestration method.",
+        "testStrategy": "Unit tests for each fetcher with mock responses. Integration tests with live APIs. Test error handling with network failures and invalid responses.",
+        "priority": "high",
+        "dependencies": [
+          "2"
+        ],
+        "status": "done",
+        "subtasks": [],
+        "complexity": 8,
+        "recommendedSubtasks": 6,
+        "expansionPrompt": "Break this complex data pipeline into individual fetcher implementations: PacificaDataFetcher for market data, CambrianDataFetcher for token details, OIDataFetcher for open interest, MacroContextFetcher for macro data, error handling and retry logic, and MarketDataAggregator orchestration.",
+        "updatedAt": "2025-10-30T14:56:39.157Z"
+      },
+      {
+        "id": 4,
+        "title": "Implement Technical Indicators Calculator",
+        "description": "Add pandas and ta library support with indicator calculations for all market data",
+        "details": "Add pandas and ta dependencies to requirements.txt. Implement IndicatorCalculator class with SMA (20,50), RSI (14), MACD (12,26,9), Bollinger Bands (5,2). Process OHLCV data and return enhanced DataFrames with technical indicators.",
+        "testStrategy": "Unit tests with known OHLCV data to verify indicator calculations match expected values. Test edge cases with insufficient data.",
+        "priority": "medium",
+        "dependencies": [
+          "3"
+        ],
+        "status": "done",
+        "subtasks": [],
+        "complexity": 5,
+        "recommendedSubtasks": 4,
+        "expansionPrompt": "Divide the technical indicators implementation into: dependency setup and configuration, core IndicatorCalculator class with basic indicators (SMA, RSI), advanced indicators (MACD, Bollinger Bands), and data processing pipeline integration.",
+        "updatedAt": "2025-10-30T14:56:47.694Z"
+      },
+      {
+        "id": 5,
+        "title": "Implement LLM Client and Decision Engine",
+        "description": "Create DeepSeek API client with prompt formatting and response parsing",
+        "details": "Implement ModelClient for DeepSeek API with authentication, retries, daily spend limits. Create LLMTradingAgent with format_prompt() for macro context + market data table, query_model() with forced response format, parse_response() with strict regex validation. Support 2 retries with clearer prompts, fallback to 'NOTHING' on parse errors.",
+        "testStrategy": "Unit tests for prompt formatting with mock data. Test response parsing with valid/invalid responses. Integration tests with DeepSeek API using test prompts.",
+        "priority": "high",
+        "dependencies": [
+          "4"
+        ],
+        "status": "done",
+        "subtasks": [],
+        "complexity": 7,
+        "recommendedSubtasks": 5,
+        "expansionPrompt": "Break down the LLM integration into: ModelClient implementation with authentication and rate limiting, prompt formatting system for market data, response parsing with strict validation, retry logic and error handling, and LLMTradingAgent orchestration.",
+        "updatedAt": "2025-10-30T15:04:46.272Z"
+      },
+      {
+        "id": 6,
+        "title": "Implement Trade Execution with Risk Management",
+        "description": "Integrate LLM decisions with existing Pacifica SDK and risk management systems",
+        "details": "Implement TradeExecutor.execute_decision() using existing PacificaAPI, RiskManager, TradeTracker. Enforce MAX_OPEN_POSITIONS=3 limit. Handle partial fills properly. Add dry-run mode. Implement 3-level ladder TP system [2%, 4%, 6%] with 1% stop loss. Add session logging to logs/bot_sessions.log.",
+        "testStrategy": "Unit tests for trade execution logic with mock orders. Test partial fill handling. Integration tests in dry-run mode. Verify risk limits are enforced.",
+        "priority": "high",
+        "dependencies": [
+          "5"
+        ],
+        "status": "done",
+        "subtasks": [],
+        "complexity": 9,
+        "recommendedSubtasks": 7,
+        "expansionPrompt": "Split trade execution into critical components: TradeExecutor core implementation, risk management integration with position limits, partial fill handling logic, dry-run mode implementation, take-profit ladder system, stop-loss implementation, and comprehensive logging.",
+        "updatedAt": "2025-10-30T15:12:52.833Z"
+      },
+      {
+        "id": 7,
+        "title": "Create Main Bot Loop with Scheduling",
+        "description": "Implement the main bot execution loop with configurable intervals and comprehensive logging",
+        "details": "Create bot_llm.py main entry point that orchestrates all components. Implement scheduling loop (5-15 min configurable intervals). Add readable log formatting showing every LLM decision with reasoning. Include market data summary in logs. Add signal handling for graceful shutdown.",
+        "testStrategy": "Test bot runs for extended periods without crashes. Verify all decisions are logged properly. Test graceful shutdown handling. Performance test with different check intervals.",
+        "priority": "medium",
+        "dependencies": [
+          "6"
+        ],
+        "status": "pending",
+        "subtasks": [],
+        "complexity": 6,
+        "recommendedSubtasks": 5,
+        "expansionPrompt": "Organize the main bot loop into: scheduling system with configurable intervals, component orchestration and data flow, comprehensive logging system, signal handling for graceful shutdown, and performance monitoring."
+      },
+      {
+        "id": 8,
+        "title": "Add Configuration Management and Environment Handling",
+        "description": "Extend config system for LLM agent settings and add proper environment variable management",
+        "details": "Extend config.py with LLMConfig class for model settings, API keys, timeframes, position sizing. Add environment variable validation. Create .env.example with all required variables. Add configuration validation on startup. Support both dry-run and live trading modes.",
+        "testStrategy": "Test configuration loading with valid/invalid environment variables. Verify all config validation works properly. Test switching between dry-run and live modes.",
+        "priority": "medium",
+        "dependencies": [
+          "7"
+        ],
+        "status": "pending",
+        "subtasks": [],
+        "complexity": 4,
+        "recommendedSubtasks": 4,
+        "expansionPrompt": "Split configuration management into: LLMConfig class design and implementation, environment variable validation system, configuration file templates and examples, and startup validation and error handling."
+      },
+      {
+        "id": 9,
+        "title": "Implement Social Sentiment Integration (Phase 4)",
+        "description": "Add Deep42 social sentiment data to enhance LLM decision making",
+        "details": "Integrate Cambrian Deep42 API for top 10 tokens by volume. Add sentiment columns to market data table (sentiment score, social volume, trending status). Update LLM prompt to include sentiment context. Keep implementation lightweight to maintain performance.",
+        "testStrategy": "Test Deep42 API integration with sample queries. Verify sentiment data enhances decision quality through backtesting. Monitor API performance impact.",
+        "priority": "low",
+        "dependencies": [
+          "8"
+        ],
+        "status": "pending",
+        "subtasks": [],
+        "complexity": 5,
+        "recommendedSubtasks": 4,
+        "expansionPrompt": "Break sentiment integration into: Deep42 API integration and data fetching, sentiment data processing and normalization, LLM prompt enhancement with sentiment context, and performance impact monitoring."
+      },
+      {
+        "id": 10,
+        "title": "Add Comprehensive Error Handling and Recovery",
+        "description": "Implement robust error handling for production deployment",
+        "details": "Add comprehensive try-catch blocks around all API calls. Implement exponential backoff for retries. Add graceful degradation when data sources fail. Implement health checks and monitoring. Add emergency stop mechanisms. Log all errors with context for debugging.",
+        "testStrategy": "Test error handling with simulated API failures, network issues, and malformed responses. Verify bot continues operating with degraded data. Test emergency stop functionality.",
+        "priority": "high",
+        "dependencies": [
+          "8"
+        ],
+        "status": "pending",
+        "subtasks": [],
+        "complexity": 7,
+        "recommendedSubtasks": 6,
+        "expansionPrompt": "Organize error handling into: comprehensive try-catch implementation across all components, exponential backoff and retry mechanisms, graceful degradation strategies, health check and monitoring systems, emergency stop mechanisms, and debugging and logging enhancements."
+      },
+      {
+        "id": 11,
+        "title": "Performance Monitoring and Analytics System",
+        "description": "Add performance tracking and decision outcome analysis",
+        "details": "Implement performance metrics tracking (win rate, average profit, Sharpe ratio). Log each decision with outcome for analysis. Create analytics reports for strategy optimization. Add backtesting capability for historical validation. Monitor API costs and usage patterns.",
+        "testStrategy": "Verify metrics are calculated correctly. Test analytics report generation. Validate backtesting against known historical periods. Monitor resource usage and optimization opportunities.",
+        "priority": "low",
+        "dependencies": [
+          "10"
+        ],
+        "status": "pending",
+        "subtasks": [],
+        "complexity": 6,
+        "recommendedSubtasks": 5,
+        "expansionPrompt": "Split analytics into: performance metrics calculation system, decision outcome tracking and analysis, analytics reporting and visualization, backtesting framework implementation, and cost monitoring and optimization."
+      },
+      {
+        "id": 12,
+        "title": "Multi-Timeframe Support Enhancement",
+        "description": "Extend data pipeline to support multiple timeframes for better market context",
+        "details": "Modify data fetchers to support 15m, 1H, 4H timeframes. Add timeframe weighting in LLM prompts (recent data more important). Show trend analysis across multiple timeframes. Maintain single trade decision output despite multi-timeframe input.",
+        "testStrategy": "Test data fetching across all timeframes. Verify LLM can process multi-timeframe data effectively. Compare decision quality vs single timeframe baseline.",
+        "priority": "low",
+        "dependencies": [
+          "11"
+        ],
+        "status": "pending",
+        "subtasks": [],
+        "complexity": 6,
+        "recommendedSubtasks": 4,
+        "expansionPrompt": "Break multi-timeframe support into: data fetcher modifications for multiple timeframes, timeframe weighting and prioritization logic, LLM prompt enhancement for multi-timeframe context, and decision quality validation and testing."
+      }
+    ],
+    "metadata": {
+      "version": "1.0.0",
+      "lastModified": "2025-10-30T15:12:52.834Z",
+      "taskCount": 12,
+      "completedCount": 6,
+      "tags": [
+        "master"
+      ],
+      "created": "2025-10-31T15:11:41.771Z",
+      "description": "Tasks for master context",
+      "updated": "2025-10-31T15:11:41.771Z"
+    }
+  }
+}

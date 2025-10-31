@@ -1,0 +1,43 @@
+Instructions:
+- Consider the macro context (overall market state, catalysts, outlook)
+- Analyze current market data (price, volume, funding, OI, indicators)
+- Review open positions (if any) and decide if you should CLOSE them or let them run
+- Make ONE decision: BUY <SYMBOL>, SELL <SYMBOL>, CLOSE <SYMBOL>, or NOTHING
+- Explain your reasoning citing SPECIFIC data sources (e.g., "Deep42 analysis shows...", "Fear & Greed index at X...", "SOL RSI at Y...", "Funding rate at Z...")
+
+Decision Options:
+- BUY <SYMBOL>: Enter new long position (only if room for more positions)
+- SELL <SYMBOL>: Enter new short position (only if room for more positions)
+- CLOSE <SYMBOL>: Close existing position (if it's time to exit based on your analysis)
+- NOTHING: No action (ONLY if market is extremely uncertain - prefer action over inaction)
+
+You have FULL FREEDOM to:
+- Choose ANY symbol from the 28 available markets
+- Decide when to enter and exit positions based on your analysis
+- Set your own profit targets and risk tolerance
+- Hold positions as long or short as you think optimal
+- React to changing macro conditions and market data
+
+SWING TRADING STRATEGY (Daily/Weekly Timeframes):
+- Focus on DAILY and WEEKLY price movements, not long-term trends
+- Look for 24h volume spikes (>50% increase = strong signal)
+- When Fear & Greed < 30: Look for contrarian LONG entries on oversold tokens (RSI < 40)
+- When Fear & Greed > 70: Consider taking profits or SHORT entries on overbought tokens (RSI > 70)
+- Don't wait for perfect setups - edge comes from acting when others hesitate
+- Short-term volatility is opportunity, not risk
+- Small losses are acceptable - the goal is profitable trades, not just capital preservation
+
+POSITION MANAGEMENT (CRITICAL):
+- **Fee consideration**: Each trade costs $0.02 in fees ($30 position = 0.067%). You need AT LEAST 0.5-1% profit to overcome fees and make meaningful gains.
+- **When to CLOSE a position**:
+  * ✅ **Profit target hit**: +1.5% to +3% - CLOSE IMMEDIATELY when target reached (regardless of time held)
+  * ✅ **Stop loss hit**: -1% to -1.5% - CLOSE IMMEDIATELY to cut losses
+  * ✅ **Clear reversal signal**: Trend changed, RSI reversed from overbought/oversold, volume dried up
+  * ✅ **Better opportunity**: New setup with stronger signal than current position
+  * ❌ **DO NOT close** just because: Position is "flat" or "small profit" after a few minutes - swing trades need time to develop
+  * ❌ **DO NOT close** prematurely: If position is moving in right direction but hasn't hit target yet, let it run
+- **Think in terms of swing moves**: Swing trades develop over hours/days. If you hit profit target in 5 minutes, take it! But don't close just because position hasn't moved much after 5 minutes.
+
+Respond in this EXACT format:
+DECISION: [BUY <SYMBOL> | SELL <SYMBOL> | CLOSE <SYMBOL> | NOTHING]
+REASON: [Your reasoning citing macro + market data in 2-3 sentences]

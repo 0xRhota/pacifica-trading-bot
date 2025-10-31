@@ -11,10 +11,10 @@ load_dotenv()
 class PacificaConfig:
     """Pacifica DEX (Solana) configuration"""
 
-    # API
-    API_KEY = "7a7voQH3WWD1fi6B25gWSzCUicvmrbtJh8sb2McJeWeg"
+    # API - Load from environment variables
+    API_KEY = os.getenv("PACIFICA_API_KEY")
     BASE_URL = "https://api.pacifica.fi/api/v1"
-    ACCOUNT_ADDRESS = "8saejVsbEBraGvxbJGxrosv4QKMfR2i8f59GFAnMXfMc"
+    ACCOUNT_ADDRESS = os.getenv("PACIFICA_ACCOUNT")
 
     # Fees
     TAKER_FEE = 0.0004  # 0.04%
@@ -23,14 +23,42 @@ class PacificaConfig:
     MIN_POSITION_USD = 30.0
     MAX_POSITION_USD = 40.0
 
-    # Symbol-specific lot sizes (DEX enforced)
+    # Symbol-specific lot sizes (DEX enforced) - sourced from Pacifica API /info endpoint
     LOT_SIZES = {
-        "SOL": 0.01,      # 0.01 SOL min
-        "ETH": 0.01,      # 0.01 ETH min
-        "BTC": 0.001,     # 0.001 BTC min (~$122)
-        "PENGU": 1,       # 1 PENGU min
-        "XPL": 1,         # 1 XPL min
-        "ASTER": 1,       # 1 ASTER min
+        # Major tokens
+        "SOL": 0.01,
+        "ETH": 0.0001,
+        "BTC": 0.00001,
+        "XRP": 0.01,
+        "BNB": 0.001,
+        "AVAX": 0.01,
+        "LTC": 0.01,
+        "ZEC": 0.01,
+        "PAXG": 0.001,
+
+        # L1/L2 tokens
+        "SUI": 0.1,
+        "ENA": 1,
+        "HYPE": 0.01,
+        "AAVE": 0.01,
+        "LINK": 0.1,
+        "LDO": 0.1,
+        "UNI": 0.1,
+        "CRV": 0.1,
+
+        # Meme/community tokens
+        "PUMP": 1,
+        "DOGE": 1,
+        "FARTCOIN": 0.1,
+        "kBONK": 1,
+        "PENGU": 1,
+        "kPEPE": 1,
+        "WLFI": 1,
+        "ASTER": 0.01,
+        "XPL": 1,
+        "2Z": 1,
+        "MON": 1,
+        "VIRTUAL": 0.1,
     }
 
     # Symbols to trade (BTC excluded - min lot > max position)
@@ -124,13 +152,14 @@ def validate_config():
     """Validate configuration on import"""
     errors = []
 
-    # Check required env vars
-    if not GlobalConfig.SOLANA_PRIVATE_KEY:
-        errors.append("SOLANA_PRIVATE_KEY not set in environment")
-    if not LighterConfig.API_KEY_PUBLIC:
-        errors.append("LIGHTER_API_KEY_PUBLIC not set in environment")
-    if not LighterConfig.API_KEY_PRIVATE:
-        errors.append("LIGHTER_API_KEY_PRIVATE not set in environment")
+    # Check required env vars (only warn, don't fail - allow running single bot)
+    # Pacifica can use API Agent Keys (doesn't require SOLANA_PRIVATE_KEY)
+    # if not GlobalConfig.SOLANA_PRIVATE_KEY:
+    #     errors.append("SOLANA_PRIVATE_KEY not set in environment")
+    # if not LighterConfig.API_KEY_PUBLIC:
+    #     errors.append("LIGHTER_API_KEY_PUBLIC not set in environment")
+    # if not LighterConfig.API_KEY_PRIVATE:
+    #     errors.append("LIGHTER_API_KEY_PRIVATE not set in environment")
 
     # Check lot sizes match trading symbols
     for symbol in PacificaConfig.TRADING_SYMBOLS:

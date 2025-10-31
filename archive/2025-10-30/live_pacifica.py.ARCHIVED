@@ -56,13 +56,13 @@ class PacificaTradingBot:
         logger.info("🚀 STARTING ENHANCED PACIFICA BOT")
         logger.info("=" * 70)
         logger.info(f"Strategy: {self.strategy.__class__.__name__}")
-        logger.info(f"Position size: ${BotConfig.MIN_POSITION_SIZE_USD}-${BotConfig.MAX_POSITION_SIZE_USD}")
-        logger.info(f"Ladder TP: {BotConfig.LADDER_TP_LEVELS} (sizes: {BotConfig.LADDER_TP_SIZES})")
-        logger.info(f"Stop loss: {BotConfig.MAX_LOSS_THRESHOLD*100:.1f}%")
+        logger.info(f"Position size: ${BotConfig.MIN_POSITION_USD}-${BotConfig.MAX_POSITION_USD}")
+        logger.info(f"Ladder TP: {BotConfig.TAKE_PROFIT_LEVELS} (sizes: {BotConfig.TAKE_PROFIT_SIZES})")
+        logger.info(f"Stop loss: {BotConfig.STOP_LOSS*100:.1f}%")
         logger.info(f"Max spread: {BotConfig.MAX_SPREAD_PCT}%")
         logger.info(f"Min orders: {BotConfig.MIN_ORDER_COUNT}")
         logger.info(f"Weighted depth: {BotConfig.WEIGHTED_DEPTH}")
-        logger.info(f"Time limit: {'None (let winners run!)' if BotConfig.MAX_POSITION_HOLD_TIME is None else f'{BotConfig.MAX_POSITION_HOLD_TIME}s'}")
+        logger.info(f"Time limit: {'None (let winners run!)' if BotConfig.MAX_HOLD_TIME_SEC is None else f'{BotConfig.MAX_HOLD_TIME_SEC}s'}")
         logger.info("=" * 70)
 
         self.running = True
@@ -82,7 +82,7 @@ class PacificaTradingBot:
                 try:
                     await self._check_and_manage_positions()
                     await self._maybe_open_new_position()
-                    await asyncio.sleep(BotConfig.CHECK_FREQUENCY_SECONDS)
+                    await asyncio.sleep(BotConfig.CHECK_FREQUENCY_SEC)
                 except Exception as e:
                     logger.error(f"Error in trading cycle: {e}", exc_info=True)
                     await asyncio.sleep(10)
@@ -90,9 +90,8 @@ class PacificaTradingBot:
     async def _sync_positions_from_api(self):
         """Load positions from Pacifica API on startup"""
         try:
-            # SDK get_positions() doesn't take parameters
-            result = self.sdk.get_positions()
-            positions = result.get('data', []) if result else []
+            # Use API to get positions
+            positions = await self.api.get_positions()
             if positions:
                 for pos in positions:
                     symbol = pos.get('symbol')
@@ -158,13 +157,23 @@ class PacificaTradingBot:
     async def _close_position(self, symbol: str, trade: dict, reason: str):
         """Close a position"""
         try:
-            # Close via SDK (SDK is synchronous, not async)
-            result = self.sdk.close_position(symbol)
+            # Get current price and position size
+            current_price = await self.api.get_market_price(symbol)
+
+            # Determine opposite side to close
+            side = "ask" if trade['side'] == "buy" else "bid"
+
+            # Close via SDK
+            result = self.sdk.create_market_order(
+                symbol=symbol,
+                side=side,
+                amount=str(trade['size']),
+                slippage_percent="1.0",
+                reduce_only=True  # Close only
+            )
 
             if result and result.get('success'):
                 logger.info(f"✅ {symbol} closed: {reason}")
-                # Log exit with current price
-                current_price = await self.api.get_market_price(symbol)
                 tracker.log_exit(trade['order_id'], current_price, exit_reason=reason)
             else:
                 logger.error(f"❌ Failed to close {symbol}")
@@ -177,7 +186,7 @@ class PacificaTradingBot:
         current_time = time.time()
 
         # Check trade frequency
-        if current_time - self.last_trade_time < BotConfig.TRADE_FREQUENCY_SECONDS:
+        if current_time - self.last_trade_time < BotConfig.TRADE_FREQUENCY_SEC:
             return
 
         # Get account info
@@ -223,16 +232,21 @@ class PacificaTradingBot:
             position_value = size * current_price
 
             # Check risk limits
-            if position_value > BotConfig.MAX_POSITION_SIZE_USD:
-                logger.warning(f"⚠️  {symbol} minimum lot size (${position_value:.2f}) exceeds max position (${BotConfig.MAX_POSITION_SIZE_USD}), skipping")
+            if position_value > BotConfig.MAX_POSITION_USD:
+                logger.warning(f"⚠️  {symbol} minimum lot size (${position_value:.2f}) exceeds max position (${BotConfig.MAX_POSITION_USD}), skipping")
                 return
 
             logger.info(f"🟢 Opening {side} position for {symbol}")
             logger.info(f"   Price: ${current_price:.2f}, Size: {size:.6f}, Value: ${position_value:.2f}")
 
-            # Place order (SDK is synchronous, not async)
-            # SDK signature: create_market_order(symbol, side, amount)
-            result = self.sdk.create_market_order(symbol, side, str(size))
+            # Place order via SDK (uses API agent key)
+            result = self.sdk.create_market_order(
+                symbol=symbol,
+                side=side,
+                amount=str(size),
+                slippage_percent="1.0",
+                reduce_only=False
+            )
 
             logger.info(f"SDK Response: {result}")
 
@@ -271,17 +285,20 @@ class PacificaTradingBot:
 
 
 async def main():
-    # Initialize SDK
-    sdk = PacificaSDK(
-        private_key=os.getenv("SOLANA_PRIVATE_KEY"),
-        base_url=BotConfig.BASE_URL
-    )
-
-    # Initialize config
+    # Initialize config (API key only, no private key needed)
     config = TradingConfig(
         api_key=BotConfig.API_KEY,
         base_url=BotConfig.BASE_URL
     )
+
+    # Initialize SDK with API Agent Key
+    sdk = PacificaSDK(
+        private_key=BotConfig.API_KEY,  # API Agent private key from .env
+        account_address=BotConfig.ACCOUNT_ADDRESS,  # Main trading account
+        base_url=BotConfig.BASE_URL
+    )
+    logger.info(f"✅ SDK initialized with agent wallet: {sdk.agent_public_key}")
+    logger.info(f"✅ Trading account: {sdk.account_address}")
 
     # Create bot
     bot = PacificaTradingBot(sdk, config)

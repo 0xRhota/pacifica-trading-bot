@@ -10,6 +10,7 @@ import json
 import time
 import logging
 import random
+import os
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from decimal import Decimal
@@ -17,6 +18,10 @@ import hmac
 import hashlib
 import base64
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -308,9 +313,13 @@ class VolumeBot:
         return True
 
 async def main():
-    # Configuration
+    # Configuration - Load API key from environment
+    api_key = os.getenv("PACIFICA_API_KEY")
+    if not api_key:
+        raise ValueError("PACIFICA_API_KEY not found in environment variables. Please set it in .env file")
+
     config = TradingConfig(
-        api_key="7a7voQH3WWD1fi6B25gWSzCUicvmrbtJh8sb2McJeWeg",
+        api_key=api_key,
         max_position_size=100.0,  # $100 max per position
         trade_frequency=45,  # 45 seconds between trades
         symbols=["SOL-USD", "BTC-USD", "ETH-USD"]
