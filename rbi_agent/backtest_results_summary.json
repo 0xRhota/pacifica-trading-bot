@@ -1,0 +1,69 @@
+{
+  "timestamp": "2025-11-02T23:22:12.837006",
+  "total": 10,
+  "passing": 0,
+  "failing": 0,
+  "errors": 10,
+  "results": [
+    {
+      "file": "T00_MomentumContraction_BT.py",
+      "success": false,
+      "error": "  File \"/var/folders/z3/gh2hsw0n0w90jjd5vzcdwbr40000gn/T/tmpbocb15jh.py\", line 73\n    bt = Backtest(data, MomentumContractionStrategy, cash=1_000_000, commission=0.002)\nIndentationError: unexpected in",
+      "return": null
+    },
+    {
+      "file": "T01_BearishMomentum_BT.py",
+      "success": false,
+      "error": "  File \"/var/folders/z3/gh2hsw0n0w90jjd5vzcdwbr40000gn/T/tmpmenlf3p7.py\", line 70\n    bt = Backtest(data, BearishMomentumStrategy, cash=1_000_000, commission=0.002)\nIndentationError: unexpected indent",
+      "return": null
+    },
+    {
+      "file": "T02_MomentumConvergence_BT.py",
+      "success": false,
+      "error": "  File \"/var/folders/z3/gh2hsw0n0w90jjd5vzcdwbr40000gn/T/tmp5epx_p19.py\", line 83\n    bt = Backtest(data, MomentumConvergenceStrategy, cash=1_000_000, commission=0.002)\nIndentationError: unexpected in",
+      "return": null
+    },
+    {
+      "file": "T03_AdaptiveBandwidth_BT.py",
+      "success": false,
+      "error": "  File \"/var/folders/z3/gh2hsw0n0w90jjd5vzcdwbr40000gn/T/tmp6jyeg30r.py\", line 74\n    bt = Backtest(data, AdaptiveBandwidthStrategy, cash=1_000_000, commission=0.002)\nIndentationError: unexpected inde",
+      "return": null
+    },
+    {
+      "file": "T04_AdaptiveOversold_BT.py",
+      "success": false,
+      "error": "  File \"/var/folders/z3/gh2hsw0n0w90jjd5vzcdwbr40000gn/T/tmp9avex2et.py\", line 69\n    bt = Backtest(data, AdaptiveOversoldStrategy, cash=1_000_000, commission=0.002)\nIndentationError: unexpected inden",
+      "return": null
+    },
+    {
+      "file": "T05_MomentumSurge_BT.py",
+      "success": false,
+      "error": "  File \"/var/folders/z3/gh2hsw0n0w90jjd5vzcdwbr40000gn/T/tmp3lcz6iqw.py\", line 77\n    bt = Backtest(data, MomentumSurgeStrategy, cash=1_000_000, commission=0.002)\nIndentationError: unexpected indent\n",
+      "return": null
+    },
+    {
+      "file": "T06_MomentumDivergence_BT.py",
+      "success": false,
+      "error": "  File \"/var/folders/z3/gh2hsw0n0w90jjd5vzcdwbr40000gn/T/tmp7pf3v5z4.py\", line 72\n    bt = Backtest(data, MomentumDivergenceStrategy, cash=1_000_000, commission=0.002)\nIndentationError: unexpected ind",
+      "return": null
+    },
+    {
+      "file": "T07_AdaptiveBandOscillator_BT.py",
+      "success": false,
+      "error": "  File \"/var/folders/z3/gh2hsw0n0w90jjd5vzcdwbr40000gn/T/tmp3gytb6a6.py\", line 90\n    bt = Backtest(data, AdaptiveBandOscillator, cash=1_000_000, commission=0.002)\nIndentationError: unexpected indent\n",
+      "return": null
+    },
+    {
+      "file": "T08_AdaptivePullback_BT.py",
+      "success": false,
+      "error": "  File \"/var/folders/z3/gh2hsw0n0w90jjd5vzcdwbr40000gn/T/tmpiy05fb94.py\", line 60\n    bt = Backtest(data, AdaptivePullback, cash=1_000_000, commission=0.002)\nIndentationError: unexpected indent\n",
+      "return": null
+    },
+    {
+      "file": "T09_AdaptiveMomentum_BT.py",
+      "success": false,
+      "error": "  File \"/var/folders/z3/gh2hsw0n0w90jjd5vzcdwbr40000gn/T/tmpj0ssm_7z.py\", line 68\n    bt = Backtest(data, AdaptiveMomentumStrategy, cash=1_000_000, commission=0.002)\nIndentationError: unexpected inden",
+      "return": null
+    }
+  ]
+}

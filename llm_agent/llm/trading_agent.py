@@ -70,115 +70,37 @@ class LLMTradingAgent:
         self.prompt_formatter = PromptFormatter()
         self.response_parser = ResponseParser()
 
-        # Initialize Deep42 tool for custom LLM queries
+        # Initialize Deep42 tool for macro market analysis
         self.deep42_tool = Deep42Tool(cambrian_api_key=cambrian_api_key)
 
         # Initialize token analysis tool for dynamic token discovery
         self.token_tool = TokenAnalysisTool(cambrian_api_key=cambrian_api_key)
-
-        # Track recent queries to avoid repetition (keep last 5)
-        self.recent_queries = []
+        
+        # Track recently selected tokens to encourage variety (keep last 20)
+        self.recently_selected_tokens = []
 
         logger.info(f"✅ LLMTradingAgent initialized (model={model}, max_positions={max_positions})")
 
-    def _generate_deep42_query(self) -> Optional[str]:
-        """
-        Ask LLM to generate a custom Deep42 query for daily/weekly context
-
-        Returns:
-            Custom question string to ask Deep42, or None if failed
-        """
-        from datetime import datetime
-
-        today = datetime.now().strftime("%A, %B %d, %Y")
-
-        # Build recent query context to avoid repetition
-        avoid_section = ""
-        if self.recent_queries:
-            avoid_section = f"\n\nDO NOT ASK SIMILAR QUESTIONS TO THESE RECENT ONES:\n"
-            for i, q in enumerate(self.recent_queries[-5:], 1):
-                avoid_section += f"{i}. {q}\n"
-            avoid_section += "\nGenerate a COMPLETELY DIFFERENT question type.\n"
-
-        query_generation_prompt = f"""You are a crypto trading bot about to make trading decisions on Solana DEX markets.
-
-Today's date: {today}
-
-Your task: Generate a single, focused question to ask Deep42 (a crypto market intelligence API) that will give you the most useful daily or weekly context for making trading decisions RIGHT NOW.
-
-Guidelines:
-- Focus on TODAY or THIS WEEK's events, catalysts, news, or token-specific developments
-- Be specific about tokens, protocols, or market segments if relevant
-- Ask about actionable information (launches, updates, sentiment shifts, breaking news)
-- Avoid generic questions everyone already knows (e.g., "alt season potential")
-
-Examples of GOOD questions (ASK DIFFERENT TYPES EACH TIME):
-- "What are whale wallets accumulating right now based on on-chain data?"
-- "Are there major unlock events or vesting schedules ending this week for any top 100 tokens?"
-- "What tokens have unusual social sentiment spikes or FUD campaigns in the last 12 hours?"
-- "Are there any imminent protocol upgrades, governance votes, or treasury decisions for DeFi blue chips?"
-- "What narratives are gaining momentum on crypto Twitter in the last 24 hours?"
-- "Are there any regulatory news, exchange listings, or institutional moves announced today?"
-- "Which Solana meme coins have suspicious volume patterns or rug pull risks today?"
-- "What major partnerships or integrations were announced this week in the Solana ecosystem?"
-- "Are there any major DEX or lending protocol exploits or security incidents reported today?"
-- "Which tokens have the highest funding rates right now and what does that signal?"
-{avoid_section}
-VARY YOUR QUESTION - mix on-chain data, social sentiment, events, narratives, risk analysis, technical analysis, macro factors, etc.
-
-Respond with ONLY the question, no other text."""
-
-        try:
-            result = self.model_client.query(
-                prompt=query_generation_prompt,
-                max_tokens=150,
-                temperature=0.8  # Higher temp for more variety
-            )
-
-            if result is None:
-                logger.warning("Failed to generate Deep42 query from LLM")
-                return None
-
-            question = result["content"].strip()
-            logger.info(f"Generated Deep42 query: {question}")
-
-            # Track this query to avoid repeating it
-            self.recent_queries.append(question)
-            if len(self.recent_queries) > 5:
-                self.recent_queries.pop(0)  # Keep only last 5
-
-            return question
-
-        except Exception as e:
-            logger.error(f"Error generating Deep42 query: {e}")
-            return None
-
     def _get_deep42_context(self) -> str:
         """
-        Get custom Deep42 context by having LLM generate query and execute it
+        Get macro market state from Deep42
 
         Returns:
-            Deep42's answer formatted for inclusion in trading prompt
+            Deep42's macro market analysis formatted for inclusion in trading prompt
         """
-        logger.info("Getting custom Deep42 context...")
+        logger.info("Getting Deep42 macro market state...")
 
-        # Step 1: LLM generates custom query
-        question = self._generate_deep42_query()
+        # Simple, focused question about macro market state
+        from datetime import datetime
+        today = datetime.now().strftime("%A, %B %d, %Y")
+        question = f"What is the macro state of the crypto market today ({today})? Include overall market direction (up/down), sentiment, major trends, and key factors affecting the market."
 
-        if question is None:
-            return "⚠️ Deep42 query generation failed"
-
-        # Step 2: Execute query against Deep42
+        # Execute query against Deep42
         answer = self.deep42_tool.query(question)
+        if not answer:
+            return f"⚠️ Deep42 macro analysis unavailable"
 
-        if answer is None:
-            return f"⚠️ Deep42 query failed\nQuestion asked: {question}"
-
-        # Step 3: Format for prompt
-        return f"""Custom Deep42 Query (Daily/Weekly Context):
-Question: {question}
-
-Deep42 Answer (Cambrian Network):
+        return f"""Deep42 Macro Market Analysis ({today}):
 {answer}
 """
 
@@ -193,53 +115,82 @@ Deep42 Answer (Cambrian Network):
         Returns:
             List of selected token symbols
         """
+        import random
         from datetime import datetime
 
         today = datetime.now().strftime("%A, %B %d, %Y")
 
-        # Sample tokens for prompt (show top 50)
-        token_list = ", ".join(available_tokens[:50])
+        # Shuffle available tokens to break deterministic ordering
+        # This ensures the LLM sees different tokens at the top each time
+        shuffled_tokens = available_tokens.copy()
+        random.shuffle(shuffled_tokens)
+        
+        # Sample tokens for prompt (show shuffled list, up to 50)
+        token_list = ", ".join(shuffled_tokens[:50])
+        
+        # Get recently selected tokens (last 20) to encourage variety
+        recent_context = ""
+        if self.recently_selected_tokens:
+            recent_str = ", ".join(self.recently_selected_tokens[-10:])  # Last 10
+            recent_context = f"\n\nRecently analyzed tokens (avoid repeating these unless they show strong new signals): {recent_str}"
 
         selection_prompt = f"""You are a crypto trading bot analyzing markets to make trading decisions.
 
 Today's date: {today}
 
-Available perpetual tokens (sorted by open interest):
+Available perpetual tokens (randomized order for variety):
 {token_list}
+{recent_context}
 
 Your task: Select {num_tokens} tokens that you want to analyze in depth before making your trading decision.
 
+CRITICAL: Choose DIFFERENT tokens than you've analyzed recently unless you see compelling new signals. Prioritize variety and explore new opportunities.
+
 Guidelines:
-- Consider tokens with interesting price action, recent news, or catalysts
-- Mix major assets (BTC, ETH, SOL) with altcoins if relevant
+- Select tokens with interesting price action, recent news, or catalysts
+- Mix major assets (BTC, ETH, SOL) with altcoins for diversification
 - Think about what's trending or has volatility potential
-- Avoid tokens you have no context about
+- EXPLORE NEW TOKENS - avoid defaulting to the same ones every time
+- Only repeat recently analyzed tokens if you see STRONG new signals
 
 Respond with ONLY the {num_tokens} token symbols separated by commas, no other text.
-Example: BTC, PENGU, HYPE"""
+Example: PUMP, DOGE, ENA"""
 
         try:
             result = self.model_client.query(
                 prompt=selection_prompt,
                 max_tokens=50,
-                temperature=0.4  # Slightly creative for token selection
+                temperature=0.8  # Increased from 0.4 to 0.8 for more variety and creativity
             )
 
             if result is None:
                 logger.warning("Failed to get token selection from LLM")
-                return available_tokens[:num_tokens]  # Default to top tokens
+                # Use shuffled list instead of deterministic top tokens
+                selected = shuffled_tokens[:num_tokens]
+            else:
+                # Parse response (expect: "BTC, ETH, SOL")
+                response = result["content"].strip()
+                selected = [s.strip() for s in response.split(",")]
+                selected = [s for s in selected if s]  # Remove empty strings
+                selected = [s for s in selected if s in available_tokens]  # Validate tokens
+                
+                # If LLM returned invalid tokens, fill with shuffled available tokens
+                if len(selected) < num_tokens:
+                    remaining = [t for t in shuffled_tokens if t not in selected][:num_tokens - len(selected)]
+                    selected.extend(remaining)
 
-            # Parse response (expect: "BTC, ETH, SOL")
-            response = result["content"].strip()
-            selected = [s.strip() for s in response.split(",")]
-            selected = [s for s in selected if s]  # Remove empty strings
+            # Track selected tokens for future variety
+            self.recently_selected_tokens.extend(selected)
+            if len(self.recently_selected_tokens) > 20:
+                self.recently_selected_tokens = self.recently_selected_tokens[-20:]  # Keep last 20
 
             logger.info(f"LLM selected tokens: {selected}")
             return selected[:num_tokens]
 
         except Exception as e:
             logger.error(f"Error selecting tokens: {e}")
-            return available_tokens[:num_tokens]
+            # Use shuffled list as fallback
+            return shuffled_tokens[:num_tokens]
 
     def _get_token_analyses(self, tokens: List[str]) -> str:
         """
@@ -322,10 +273,14 @@ Open Position Evaluations:
         self,
         aggregator,  # MarketDataAggregator instance
         open_positions: Optional[List[Dict]] = None,
-        force_macro_refresh: bool = False
-    ) -> Optional[Dict]:
+        force_macro_refresh: bool = False,
+        trade_tracker=None,  # TradeTracker instance
+        recently_closed_symbols: Optional[List[str]] = None,  # Symbols closed in last 2h
+        account_balance: Optional[float] = None,  # Account balance in USD
+        hourly_review: Optional[str] = None  # Hourly deep research review
+    ) -> Optional[List[Dict]]:
         """
-        Get trading decision from LLM
+        Get trading decisions from LLM (one per analyzed token)
 
         Args:
             aggregator: MarketDataAggregator instance with fetched data
@@ -333,7 +288,7 @@ Open Position Evaluations:
             force_macro_refresh: Force refresh macro context (default: False)
 
         Returns:
-            Dict with keys: action, symbol, reason, cost
+            List of decision dicts, each with keys: action, symbol, reason, confidence, cost
             None if decision failed
         """
         if open_positions is None:
@@ -341,52 +296,77 @@ Open Position Evaluations:
 
         logger.info(f"Getting trading decision (open positions: {len(open_positions)})...")
 
-        # Step 1: Get custom Deep42 context (LLM generates query, then executes it)
+        # Step 1: Get macro market state from Deep42
         deep42_context = self._get_deep42_context()
 
-        # Step 2: Get available tokens and let LLM select which to analyze
-        logger.info("Getting available tokens from HyperLiquid...")
-        available_tokens = self.token_tool.get_available_tokens(limit=50)
-
-        logger.info("LLM selecting tokens to analyze...")
-        selected_tokens = self._select_tokens_to_analyze(available_tokens, num_tokens=3)
-
-        # Step 3: Get Deep42 analysis for selected tokens
-        token_analyses = self._get_token_analyses(selected_tokens)
-
-        # Step 4: If there are open positions, get Deep42 evaluation
-        position_evaluations = self._get_position_evaluations(open_positions)
-
-        # Step 5: Get macro context (cached or fresh)
+        # Step 2: Get macro context (cached or fresh)
         logger.info("Fetching macro context...")
         macro_context = aggregator.get_macro_context(force_refresh=force_macro_refresh)
 
-        # Step 6: Fetch market data for all symbols
-        logger.info("Fetching market data for all 28 markets...")
+        # Step 3: Fetch market data for ALL Pacifica symbols with full technical indicators
+        logger.info("Fetching market data for ALL Pacifica markets with indicators...")
         market_data = aggregator.fetch_all_markets()
+        
+        # Get all available Pacifica symbols from the market data
+        all_symbols = list(market_data.keys())
+        logger.info(f"Analyzing ALL {len(all_symbols)} Pacifica markets: {', '.join(all_symbols)}")
 
-        # Step 7: Format market table
+        # Step 4: Format market table with all data (candles, RSI, MACD, SMA, etc.)
         market_table = aggregator.format_market_table(market_data)
 
-        # Step 8: Format prompt (include all context)
+        # Step 5: If there are open positions, get Deep42 evaluation
+        position_evaluations = self._get_position_evaluations(open_positions)
+
+        # Step 8: Get trade history context
+        trade_history = ""
+        if trade_tracker:
+            recent_trades = trade_tracker.get_recent_trades(hours=24, limit=10)
+            if recent_trades:
+                trade_history = "\n\nRECENT TRADING HISTORY (Last 24h):\n"
+                trade_history += "Symbol | Side | Entry Price | Exit Price | P&L | Status | Time\n"
+                trade_history += "-" * 80 + "\n"
+                for trade in recent_trades[-10:]:  # Show last 10
+                    symbol = trade.get('symbol') or 'N/A'
+                    side = (trade.get('side') or 'N/A').upper()
+                    entry = trade.get('entry_price') or 0
+                    exit_price = trade.get('exit_price')
+                    pnl = trade.get('pnl') or 0
+                    status = trade.get('status') or 'N/A'
+                    timestamp = trade.get('timestamp') or ''
+                    timestamp_str = timestamp[:16] if timestamp else 'N/A'  # Just date + time
+                    
+                    # Format exit_price safely
+                    if exit_price is None or exit_price == 'N/A':
+                        exit_str = 'N/A'
+                    else:
+                        exit_str = f"${exit_price:.4f}"
+                    
+                    trade_history += f"{symbol} | {side} | ${entry:.4f} | {exit_str} | ${pnl:.2f} | {status} | {timestamp_str}\n"
+        
+        # Step 6: Format prompt (include all context - LLM analyzes ALL markets)
         prompt = self.prompt_formatter.format_trading_prompt(
             macro_context=macro_context,
             market_table=market_table,
             open_positions=open_positions,
             deep42_context=deep42_context,
-            token_analyses=token_analyses,
-            position_evaluations=position_evaluations
+            token_analyses="",  # Not using token-specific analyses - analyzing all markets directly
+            hourly_review=hourly_review,  # Hourly deep research review if provided
+            position_evaluations=position_evaluations,
+            analyzed_tokens=all_symbols,  # Pass ALL symbols - LLM analyzes everything
+            trade_history=trade_history,  # Add trade history
+            recently_closed_symbols=recently_closed_symbols or [],  # Add recently closed symbols
+            account_balance=account_balance  # Add account balance
         )
 
-        # Step 5: Query LLM with retries
+        # Step 9: Query LLM with retries
         responses = []
         for attempt in range(self.max_retries + 1):
             logger.info(f"LLM query attempt {attempt + 1}/{self.max_retries + 1}...")
 
-            # Query model
+            # Query model (increase max_tokens for multiple decisions)
             result = self.model_client.query(
                 prompt=prompt,
-                max_tokens=100,
+                max_tokens=500,  # Increased for multiple decisions
                 temperature=0.1
             )
 
@@ -397,42 +377,76 @@ Open Position Evaluations:
             # Add response to list
             responses.append(result["content"])
 
-            # Try parsing
-            parsed = self.response_parser.parse_response(result["content"])
-            if parsed is None:
+            # Try parsing multiple decisions
+            parsed_decisions = self.response_parser.parse_multiple_decisions(result["content"])
+            if parsed_decisions is None or len(parsed_decisions) == 0:
                 logger.warning(f"Parse failed (attempt {attempt + 1}), will retry with clearer prompt")
 
                 # Modify prompt for retry (make format requirement clearer)
                 if attempt < self.max_retries:
                     prompt += (
-                        "\n\nIMPORTANT: You MUST respond in this EXACT format:\n"
-                        "DECISION: BUY SOL\n"
+                        f"\n\nIMPORTANT: Analyze ALL {len(all_symbols)} markets below and respond with decisions ONLY for markets with clear trading signals:\n"
+                        "TOKEN: PUMP\n"
+                        "DECISION: BUY PUMP\n"
+                        "CONFIDENCE: 0.75\n"
+                        "REASON: Your reasoning here\n\n"
+                        "TOKEN: SOL\n"
+                        "DECISION: SELL SOL\n"
+                        "CONFIDENCE: 0.65\n"
                         "REASON: Your reasoning here\n\n"
                         "Do NOT add any other text before or after."
                     )
                 continue
 
-            # Validate decision
-            is_valid, error = self.response_parser.validate_decision(
-                parsed,
-                open_positions,
-                self.max_positions
-            )
+            # Validate all decisions (track positions as we go)
+            valid_decisions = []
+            current_positions = open_positions.copy() if open_positions else []
+            
+            for parsed in parsed_decisions:
+                # Check if symbol was recently closed (prevent immediate re-entry)
+                # Only block if it was closed VERY recently (within 30 min) - give more freedom
+                if parsed.get("symbol") and recently_closed_symbols:
+                    if parsed["symbol"] in recently_closed_symbols and parsed["action"] in ["BUY", "SELL"]:
+                        logger.warning(f"⚠️ {parsed['action']} {parsed['symbol']}: Recently closed (within 2h) - but allowing if strong signal")
+                        # Don't block - just warn. Let the LLM's confidence decide.
+                        # Only block if confidence is low (< 0.7)
+                        if parsed.get("confidence", 0.5) < 0.7:
+                            logger.warning(f"Skipping {parsed['action']} {parsed['symbol']}: Low confidence on recently closed symbol")
+                            continue
+                
+                is_valid, error = self.response_parser.validate_decision(
+                    parsed,
+                    current_positions,  # Use current positions (updated as we validate)
+                    self.max_positions  # Use max_positions from agent (15)
+                )
+                
+                if is_valid:
+                    valid_decisions.append(parsed)
+                    # Update current_positions for next validation (simulate opening position)
+                    if parsed["action"] in ["BUY", "SELL"]:
+                        current_positions.append({"symbol": parsed["symbol"]})
+                else:
+                    logger.warning(f"Decision validation failed for {parsed.get('symbol', 'UNKNOWN')}: {error}")
 
-            if is_valid:
-                # Success!
-                logger.info(f"✅ Valid trading decision: {parsed['action']} {parsed['symbol'] or ''}")
-
-                return {
-                    "action": parsed["action"],
-                    "symbol": parsed["symbol"],
-                    "reason": parsed["reason"],
-                    "cost": result["cost"],
-                    "prompt_tokens": result["usage"]["prompt_tokens"],
-                    "completion_tokens": result["usage"]["completion_tokens"]
-                }
+            if valid_decisions:
+                # Success! Return list of decisions
+                logger.info(f"✅ Valid trading decisions: {len(valid_decisions)} decisions")
+                
+                # Return list of decisions with metadata
+                return [
+                    {
+                        "action": parsed["action"],
+                        "symbol": parsed["symbol"],
+                        "reason": parsed["reason"],
+                        "confidence": parsed.get("confidence", 0.5),
+                        "cost": result["cost"] / len(valid_decisions),  # Split cost across decisions
+                        "prompt_tokens": result["usage"]["prompt_tokens"],
+                        "completion_tokens": result["usage"]["completion_tokens"]
+                    }
+                    for parsed in valid_decisions
+                ]
             else:
-                logger.warning(f"Decision validation failed: {error}")
+                logger.warning(f"All {len(parsed_decisions)} decisions failed validation")
 
                 # If validation failed, retry with updated prompt
                 if attempt < self.max_retries:
@@ -440,15 +454,7 @@ Open Position Evaluations:
 
         # All retries exhausted - fallback to NOTHING
         logger.error("All LLM query/parse attempts failed, falling back to NOTHING")
-
-        return {
-            "action": "NOTHING",
-            "symbol": None,
-            "reason": "LLM failed to provide valid decision after retries",
-            "cost": 0.0,
-            "prompt_tokens": 0,
-            "completion_tokens": 0
-        }
+        return None  # Return None on failure
 
     def get_daily_spend(self) -> float:
         """Get current daily spend"""

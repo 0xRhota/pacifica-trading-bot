@@ -4,7 +4,7 @@ Maintains separate logs per DEX with size limits
 """
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -151,6 +151,52 @@ class TradeTracker:
 
     def get_closed_trades(self) -> List[Dict]:
         return [t for t in self.trades if t['status'] == 'closed']
+
+    def get_recent_trades(self, hours: int = 24, limit: int = 20) -> List[Dict]:
+        """
+        Get recent trades within specified hours
+        
+        Args:
+            hours: Hours to look back (default: 24)
+            limit: Max trades to return (default: 20)
+            
+        Returns:
+            List of recent trades sorted by timestamp (newest first)
+        """
+        cutoff = datetime.now() - timedelta(hours=hours)
+        recent = []
+        
+        for trade in reversed(self.trades):  # Start from newest
+            trade_time = datetime.fromisoformat(trade['timestamp'])
+            if trade_time >= cutoff:
+                recent.append(trade)
+                if len(recent) >= limit:
+                    break
+        
+        return recent
+
+    def get_recently_closed_symbols(self, hours: int = 2) -> List[str]:
+        """
+        Get symbols that were recently closed (within last N hours)
+        Useful for preventing immediate re-entry
+        
+        Args:
+            hours: Hours to look back (default: 2)
+            
+        Returns:
+            List of symbols that were recently closed
+        """
+        recent_closed = []
+        cutoff = datetime.now() - timedelta(hours=hours)
+        
+        for trade in reversed(self.trades):
+            if trade['status'] == 'closed' and trade.get('exit_timestamp'):
+                exit_time = datetime.fromisoformat(trade['exit_timestamp'])
+                if exit_time >= cutoff:
+                    if trade['symbol'] not in recent_closed:
+                        recent_closed.append(trade['symbol'])
+        
+        return recent_closed
 
     def get_stats(self) -> Dict:
         """Calculate trading statistics"""

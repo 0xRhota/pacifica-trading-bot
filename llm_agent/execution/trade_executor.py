@@ -121,7 +121,9 @@ class TradeExecutor:
         reason = decision.get("reason", "")
 
         logger.info(f"Executing decision: {action} {symbol or ''}")
-        logger.info(f"Reason: {reason[:100]}...")
+        # Log full reason (condensed on single line)
+        reason_condensed = reason.replace('\n', ' ').strip()
+        logger.info(f"Reason: {reason_condensed}")
 
         # Handle NOTHING
         if action == "NOTHING":
@@ -142,7 +144,7 @@ class TradeExecutor:
 
         # Handle BUY/SELL
         if action in ["BUY", "SELL"]:
-            return self._open_position(action, symbol, reason)
+            return self._open_position(action, symbol, reason, decision)
 
         # Invalid action
         logger.error(f"Invalid action: {action}")
@@ -156,7 +158,57 @@ class TradeExecutor:
             "error": f"Invalid action: {action}"
         }
 
-    def _open_position(self, action: str, symbol: str, reason: str) -> Dict:
+    def _fetch_account_balance(self) -> Optional[float]:
+        """
+        Fetch account balance from Pacifica API
+        
+        Returns:
+            Available balance in USD (available_to_spend), or None if fetch fails
+        """
+        try:
+            # Try account endpoint - this returns available_to_spend which is what we need
+            account_response = requests.get(
+                f"{self.sdk.base_url}/account",
+                params={"account": self.account_address},
+                timeout=10
+            )
+            if account_response.status_code == 200:
+                account_data = account_response.json()
+                if account_data.get("success") and account_data.get("data"):
+                    data = account_data["data"]
+                    # Use available_to_spend first (what's actually available for new positions)
+                    # Then fallback to balance or account_equity
+                    available_balance = data.get("available_to_spend") or data.get("balance") or data.get("account_equity") or data.get("account_value")
+                    if available_balance:
+                        balance = float(available_balance)
+                        logger.info(f"Account balance fetched: ${balance:.2f} (available_to_spend)")
+                        return balance
+            
+            # Fallback: Try to parse from positions endpoint error (if we hit one)
+            # Or return None and let it fail naturally with API error
+            return None
+        except Exception as e:
+            logger.warning(f"Could not fetch account balance: {e}")
+            return None
+
+    def _calculate_available_balance(self, account_balance: float) -> float:
+        """
+        Calculate available balance for new positions
+        
+        Args:
+            account_balance: Available balance from API (already accounts for margin used)
+            
+        Returns:
+            Available balance with small safety margin (API already accounts for positions)
+        """
+        # API's available_to_spend already accounts for margin used by open positions
+        # So we just need a small buffer for fees and rounding
+        safety_margin = 0.05  # 5% buffer for fees/slippage
+        available = account_balance * (1 - safety_margin)
+        logger.info(f"Available balance: ${account_balance:.2f}, After safety margin: ${available:.2f}")
+        return available
+
+    def _open_position(self, action: str, symbol: str, reason: str, decision: Dict = None) -> Dict:
         """
         Open new position (BUY=LONG, SELL=SHORT)
 
@@ -192,8 +244,43 @@ class TradeExecutor:
 
             logger.info(f"Current price: ${current_price:.2f}")
 
-            # Calculate position size (use default for now)
-            position_size_usd = self.default_position_size
+            # Fetch account balance and check available funds
+            account_balance = self._fetch_account_balance()
+            if account_balance is None:
+                logger.warning("Could not fetch account balance - will attempt order but may fail")
+                available_balance = None
+            else:
+                available_balance = self._calculate_available_balance(account_balance)
+
+            # Calculate position size based on confidence
+            confidence = decision.get("confidence", 0.5)  # Default to 0.5 if not provided
+            base_size = 150.0  # Increased base size for larger positions
+            
+            # Confidence-based sizing (LLM sees account balance and decides):
+            # 0.3-0.5: Low confidence = $300-450 (2x to 3x base)
+            # 0.5-0.7: Medium confidence = $450-750 (3x to 5x base)
+            # 0.7-0.9: High confidence = $750-1200 (5x to 8x base)
+            # 0.9+: Very high confidence = $1200-1800 (8x to 12x base)
+            
+            if confidence >= 0.9:
+                size_multiplier = 8.0 + (confidence - 0.9) * 40.0  # 8x to 12x
+            elif confidence >= 0.7:
+                size_multiplier = 5.0 + (confidence - 0.7) * 15.0  # 5x to 8x
+            elif confidence >= 0.5:
+                size_multiplier = 3.0 + (confidence - 0.5) * 10.0  # 3x to 5x
+            else:
+                size_multiplier = 2.0 + (confidence - 0.3) * 5.0  # 2x to 3x
+
+            position_size_usd = base_size * size_multiplier
+
+            # Cap position size to available balance if balance check succeeded
+            if available_balance is not None:
+                if position_size_usd > available_balance:
+                    logger.warning(f"Position size ${position_size_usd:.2f} exceeds available balance ${available_balance:.2f}, capping to available")
+                    position_size_usd = available_balance * 0.95  # Use 95% of available to leave small buffer
+                    logger.info(f"Adjusted position size to ${position_size_usd:.2f} based on available balance")
+
+            logger.info(f"Position sizing: confidence={confidence:.2f}, multiplier={size_multiplier:.2f}x, size=${position_size_usd:.2f}")
 
             # Get lot size from config (imported at top of file)
             from config import PacificaConfig
@@ -248,6 +335,8 @@ class TradeExecutor:
         try:
             logger.info(f"[LIVE] Placing {side} market order: {quantity:.4f} {symbol}")
 
+            # Place order with explicit timeout in requests (SIGALRM doesn't work well on all systems)
+            # The SDK's requests.post should have timeout, but we'll ensure it here
             order_result = self.sdk.create_market_order(
                 symbol=symbol,
                 side=sdk_side,

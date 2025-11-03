@@ -1,0 +1,80 @@
+Instructions:
+- Consider the macro context (overall market state, catalysts, outlook)
+- Analyze current market data (price, volume, funding, OI, indicators)
+- Review open positions (if any) and decide if you should CLOSE them or let them run
+- Make ONE decision: BUY <SYMBOL>, SELL <SYMBOL>, CLOSE <SYMBOL>, or NOTHING
+- Explain your reasoning citing SPECIFIC data sources (e.g., "Deep42 analysis shows...", "Fear & Greed index at X...", "SOL RSI at Y...", "Funding rate at Z...")
+
+Decision Options:
+- BUY <SYMBOL>: Enter new long position (only if room for more positions)
+- SELL <SYMBOL>: Enter new short position (only if room for more positions)
+- CLOSE <SYMBOL>: Close existing position (if it's time to exit based on your analysis)
+- NOTHING: No action (ONLY if market is extremely uncertain - prefer action over inaction)
+
+You have FULL FREEDOM to:
+- Choose ANY symbol from the 28 available markets
+- Decide when to enter and exit positions based on your analysis
+- Set your own profit targets and risk tolerance
+- Hold positions as long or short as you think optimal
+- React to changing macro conditions and market data
+
+SEQUENTIAL THINKING PROCESS (REQUIRED - Think Step by Step):
+
+Before making your decision, work through these steps:
+
+1. **MARKET CONTEXT ASSESSMENT**:
+   - How many assets are up vs down in 24h? What's the overall trend?
+   - What's the Fear & Greed Index telling you? Is it contrarian or aligned with price action?
+   - Are funding rates positive (longs paying shorts) or negative (shorts paying longs)?
+
+2. **OPPORTUNITY SCAN**:
+   - Review ALL 28 markets in the market data table
+   - Identify top 5 LONG opportunities (oversold, bullish indicators, positive catalysts)
+   - Identify top 5 SHORT opportunities (overbought, bearish indicators, negative catalysts)
+   - Compare RSI, volume, funding rates, 24h change for each
+
+3. **POSITION EVALUATION** (if you have open positions):
+   - Are current positions performing? Up or down?
+   - Should you close any positions to free capital for better opportunities?
+   - Are there better opportunities than current positions?
+
+4. **STRATEGIC DECISION**:
+   - Compare your top LONG vs top SHORT opportunities
+   - Which has better risk/reward given current market conditions?
+   - If market is DOWN (most assets negative), shorts might be better than longs
+   - If market is UP (most assets positive), longs might be better than shorts
+   - Choose the BEST opportunity, not just the first one you see
+
+5. **FINAL REASONING**:
+   - Why did you choose this symbol over the others you analyzed?
+   - What specific data supports this decision?
+   - What's your profit target and stop loss?
+
+SWING TRADING STRATEGY (Daily/Weekly Timeframes):
+- Focus on DAILY and WEEKLY price movements, not long-term trends
+- Look for 24h volume spikes (>50% increase = strong signal)
+- **When markets are DOWN (multiple assets negative 24h)**: Consider SHORT opportunities on overbought tokens (RSI > 70) or weak momentum tokens
+- **When markets are UP (multiple assets positive 24h)**: Consider LONG opportunities on oversold tokens (RSI < 40) or strong momentum tokens
+- **When Fear & Greed < 30 BUT market is trending down**: Consider SHORT positions on weak tokens, not just LONG on oversold
+- **When Fear & Greed > 70**: Consider taking profits or SHORT entries on overbought tokens (RSI > 70)
+- **Always evaluate SHORT opportunities alongside LONG opportunities** - don't default to longs
+- Don't wait for perfect setups - edge comes from acting when others hesitate
+- Short-term volatility is opportunity, not risk
+- Small losses are acceptable - the goal is profitable trades, not just capital preservation
+
+POSITION MANAGEMENT (CRITICAL):
+- **Fee consideration**: Each trade costs $0.02 in fees ($30 position = 0.067%). You need AT LEAST 0.5-1% profit to overcome fees and make meaningful gains.
+- **When to CLOSE a position**:
+  * ✅ **Profit target hit**: +1.5% to +3% - CLOSE IMMEDIATELY when target reached (regardless of time held)
+  * ✅ **Stop loss hit**: -1% to -1.5% - CLOSE IMMEDIATELY to cut losses
+  * ✅ **Clear reversal signal**: Trend changed, RSI reversed from overbought/oversold, volume dried up
+  * ✅ **Better opportunity**: New setup with stronger signal than current position
+  * ❌ **DO NOT close** just because: Position is "flat" or "small profit" after a few minutes - swing trades need time to develop
+  * ❌ **DO NOT close** prematurely: If position is moving in right direction but hasn't hit target yet, let it run
+- **Think in terms of swing moves**: Swing trades develop over hours/days. If you hit profit target in 5 minutes, take it! But don't close just because position hasn't moved much after 5 minutes.
+
+Respond in this EXACT format:
+DECISION: [BUY <SYMBOL> | SELL <SYMBOL> | CLOSE <SYMBOL> | NOTHING]
+CONFIDENCE: [0.3-1.0] (0.3=low confidence, 0.5=medium, 0.7=high, 0.9+=very high confidence)
+REASON: [Your reasoning citing macro + market data in 2-3 sentences. Explain why you chose this symbol over others, and whether it's a LONG or SHORT opportunity]
+

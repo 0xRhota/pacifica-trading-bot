@@ -128,9 +128,9 @@ class PacificaSDK:
             **signature_payload,
         }
 
-        # Send the request
+        # Send the request with timeout to prevent hanging
         url = f"{self.base_url}/orders/create_market"
-        response = requests.post(url, json=request, headers=headers)
+        response = requests.post(url, json=request, headers=headers, timeout=30)
 
         # Parse response
         try:

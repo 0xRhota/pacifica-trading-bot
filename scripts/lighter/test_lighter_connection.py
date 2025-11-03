@@ -23,10 +23,10 @@ async def test_lighter_connection():
         print(f"❌ Failed to import Lighter SDK: {e}")
         sys.exit(1)
 
-    # Get credentials from environment
-    api_key_private = os.getenv("LIGHTER_API_KEY_PRIVATE")
+    # Get credentials from environment (support both naming conventions)
+    api_key_private = os.getenv("LIGHTER_API_KEY_PRIVATE") or os.getenv("LIGHTER_PRIVATE_KEY")
     account_index = int(os.getenv("LIGHTER_ACCOUNT_INDEX", "1"))
-    api_key_index = int(os.getenv("LIGHTER_API_KEY_INDEX", "3"))
+    api_key_index = int(os.getenv("LIGHTER_API_KEY_INDEX", "2"))
 
     if not api_key_private:
         print("❌ LIGHTER_API_KEY_PRIVATE not found in .env")

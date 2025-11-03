@@ -16,7 +16,7 @@ async def find_account():
 
     import lighter
 
-    api_key_private = os.getenv("LIGHTER_API_KEY_PRIVATE")
+    api_key_private = os.getenv("LIGHTER_API_KEY_PRIVATE") or os.getenv("LIGHTER_PRIVATE_KEY")
 
     BASE_URL = "https://mainnet.zklighter.elliot.ai"
 
@@ -27,8 +27,8 @@ async def find_account():
 
     # Try account indexes 0-100
     for account_index in range(101):
-        # Use API key index 3 (where we registered)
-        api_key_index = 3
+        # Use API key index from env or default to 2
+        api_key_index = int(os.getenv("LIGHTER_API_KEY_INDEX", "2"))
 
         try:
             client = lighter.SignerClient(

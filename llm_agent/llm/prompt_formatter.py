@@ -160,7 +160,12 @@ class PromptFormatter:
         open_positions: Optional[List[Dict]] = None,
         deep42_context: Optional[str] = None,
         token_analyses: Optional[str] = None,
-        position_evaluations: Optional[str] = None
+        position_evaluations: Optional[str] = None,
+        analyzed_tokens: Optional[List[str]] = None,
+        trade_history: Optional[str] = None,
+        recently_closed_symbols: Optional[List[str]] = None,
+        account_balance: Optional[float] = None,
+        hourly_review: Optional[str] = None  # Hourly deep research review
     ) -> str:
         """
         Format complete trading prompt for LLM
@@ -177,6 +182,19 @@ class PromptFormatter:
             Complete formatted prompt string
         """
         sections = []
+
+        # Section 0: Hourly Deep Research Review (if provided - appears FIRST for emphasis)
+        if hourly_review:
+            sections.append(hourly_review)
+            sections.append("")
+            sections.append("⚠️ **THIS IS YOUR HOURLY DEEP RESEARCH CYCLE**")
+            sections.append("")
+            sections.append("The data above shows YOUR decisions and their outcomes from the past hour.")
+            sections.append("You MUST use sequential thinking to analyze WHY decisions were made,")
+            sections.append("how they turned out, and what patterns you can learn from.")
+            sections.append("")
+            sections.append("Apply the insights from your analysis to make better decisions in this cycle.")
+            sections.append("")
 
         # Section 1: Custom Deep42 Context (if provided)
         if deep42_context:
@@ -212,51 +230,110 @@ class PromptFormatter:
 
         sections.append(positions_str)
         sections.append("")
+        
+        # Section 7: Trade History (if provided)
+        if trade_history:
+            sections.append(trade_history)
+            sections.append("")
+        
+        # Section 8: Recently Closed Symbols Warning (if provided)
+        if recently_closed_symbols:
+            sections.append(f"⚠️ IMPORTANT: These symbols were recently closed (within last 2h): {', '.join(recently_closed_symbols)}")
+            sections.append("Avoid immediately reopening positions in these symbols unless there's a STRONG reversal signal.")
+            sections.append("")
+
+        # Section 9: Account Balance (if provided)
+        if account_balance is not None:
+            sections.append("=" * 80)
+            sections.append(f"💰 ACCOUNT BALANCE: ${account_balance:.2f}")
+            sections.append("=" * 80)
+            sections.append("")
 
         # Instructions
-        instructions = """Instructions:
-- Consider the macro context (overall market state, catalysts, outlook)
-- Analyze current market data (price, volume, funding, OI, indicators)
-- Review open positions (if any) and decide if you should CLOSE them or let them run
-- Make ONE decision: BUY <SYMBOL>, SELL <SYMBOL>, CLOSE <SYMBOL>, or NOTHING
-- Explain your reasoning citing SPECIFIC data sources (e.g., "Deep42 analysis shows...", "Fear & Greed index at X...", "SOL RSI at Y...", "Funding rate at Z...")
+        analyzed_tokens_list = analyzed_tokens if analyzed_tokens else []
+        analyzed_tokens_str = ", ".join(analyzed_tokens_list) if analyzed_tokens_list else "N/A"
+        
+        instructions = f"""You are an autonomous trading agent analyzing cryptocurrency markets.
 
-Decision Options:
-- BUY <SYMBOL>: Enter new long position (only if room for more positions)
-- SELL <SYMBOL>: Enter new short position (only if room for more positions)
-- CLOSE <SYMBOL>: Close existing position (if it's time to exit based on your analysis)
-- NOTHING: No action (ONLY if market is extremely uncertain - prefer action over inaction)
+**AVAILABLE DATA:**
 
-You have FULL FREEDOM to:
-- Choose ANY symbol from the 28 available markets
-- Decide when to enter and exit positions based on your analysis
-- Set your own profit targets and risk tolerance
-- Hold positions as long or short as you think optimal
-- React to changing macro conditions and market data
+You have complete market data for ALL {len(analyzed_tokens_list)} Pacifica markets:
 
-SWING TRADING STRATEGY (Daily/Weekly Timeframes):
-- Focus on DAILY and WEEKLY price movements, not long-term trends
-- Look for 24h volume spikes (>50% increase = strong signal)
-- When Fear & Greed < 30: Look for contrarian LONG entries on oversold tokens (RSI < 40)
-- When Fear & Greed > 70: Consider taking profits or SHORT entries on overbought tokens (RSI > 70)
-- Don't wait for perfect setups - edge comes from acting when others hesitate
-- Short-term volatility is opportunity, not risk
-- Small losses are acceptable - the goal is profitable trades, not just capital preservation
+1. **Market Data Table** (shown below) - Complete technical indicators for every market:
+   - Price and 24h volume
+   - RSI (Relative Strength Index) - momentum/overbought/oversold levels
+   - MACD (Moving Average Convergence Divergence) - trend direction and crossovers  
+   - SMA 20 vs SMA 50 - short-term vs long-term trend comparison
+   - Funding rates - market sentiment (positive = bullish, negative = bearish)
+   - Open interest - market participation levels
+   - Full OHLCV candle data for technical analysis
 
-POSITION MANAGEMENT (CRITICAL):
-- **Fee consideration**: Each trade costs $0.02 in fees ($30 position = 0.067%). You need AT LEAST 0.5-1% profit to overcome fees and make meaningful gains.
-- **When to CLOSE a position**:
-  * ✅ **Profit target hit**: +1.5% to +3% - CLOSE IMMEDIATELY when target reached (regardless of time held)
-  * ✅ **Stop loss hit**: -1% to -1.5% - CLOSE IMMEDIATELY to cut losses
-  * ✅ **Clear reversal signal**: Trend changed, RSI reversed from overbought/oversold, volume dried up
-  * ✅ **Better opportunity**: New setup with stronger signal than current position
-  * ❌ **DO NOT close** just because: Position is "flat" or "small profit" after a few minutes - swing trades need time to develop
-  * ❌ **DO NOT close** prematurely: If position is moving in right direction but hasn't hit target yet, let it run
-- **Think in terms of swing moves**: Swing trades develop over hours/days. If you hit profit target in 5 minutes, take it! But don't close just because position hasn't moved much after 5 minutes.
+2. **Macro Context** - Overall market conditions (Fear & Greed, BTC dominance, funding rates, Deep42 analysis)
 
-Respond in this EXACT format:
-DECISION: [BUY <SYMBOL> | SELL <SYMBOL> | CLOSE <SYMBOL> | NOTHING]
-REASON: [Your reasoning citing macro + market data in 2-3 sentences]"""
+3. **Your Trading History** - Recent trades and performance (learn from wins/losses)
+
+4. **Open Positions** - Current positions that may need management
+
+5. **Account Balance** - Available capital for new positions (you can open up to 15 positions)
+
+6. **Proven Strategy Patterns** - Backtested strategies that have shown profitability:
+   - **MomentumSqueeze Pattern** (1.06% return, 1.48 Sharpe, -1.13% max drawdown):
+     * Bollinger Band squeeze (bands tighten - low volatility before breakout)
+     * OBV (On-Balance Volume) crosses above its EMA (accumulation signal)
+     * Price breaks above upper Bollinger Band (momentum breakout)
+     * Exit when OBV crosses below EMA (distribution signal)
+   - Use these patterns as reference when you see similar setups - they're proven to work
+
+**YOUR TASK:**
+
+Review ALL {len(analyzed_tokens_list)} markets in the data table below. For each market, examine the data:
+- Technical indicators (RSI, MACD, SMA, volume, price action)
+- Market sentiment (funding rates, open interest)
+- Relative strength compared to other markets
+- Your trading history (what's worked, what hasn't)
+
+Then make independent trading decisions based purely on what you see in the data:
+- BUY (long) if you identify a strong bullish opportunity
+- SELL (short) if you identify a strong bearish opportunity  
+- CLOSE if you have an open position that should be closed
+- NOTHING if no clear opportunity exists
+
+**NO CONSTRAINTS:**
+- Trade any market that shows opportunity
+- Make as many or as few decisions as you want (based on what you see)
+- Use any timeframe or strategy that makes sense
+- Size positions based on your confidence and available balance
+- Trust your analysis of the data
+
+**RESPONSE FORMAT:**
+
+For each market where you see a trading opportunity, provide:
+
+TOKEN: <SYMBOL>
+DECISION: [BUY <SYMBOL> | SELL <SYMBOL> | CLOSE <SYMBOL>]
+CONFIDENCE: [0.3-1.0]
+REASON: [Brief explanation of what you see in the data that supports this decision]
+
+You don't need to respond for every market - only respond for markets where you see a clear opportunity based on the data.
+
+Example responses:
+
+TOKEN: PUMP
+DECISION: BUY PUMP
+CONFIDENCE: 0.75
+REASON: RSI 35 indicates oversold, MACD showing bullish crossover, volume up 45%, positive funding rate suggests long bias. Strong technical setup.
+
+TOKEN: SOL
+DECISION: SELL SOL
+CONFIDENCE: 0.68
+REASON: RSI 72 is overbought, SMA20 below SMA50 shows downtrend, negative funding rate indicates bearish sentiment. Price rejection at resistance.
+
+TOKEN: DOGE
+DECISION: CLOSE DOGE
+CONFIDENCE: 0.80
+REASON: Open long position has hit target, RSI now neutral, taking profit before potential reversal. Locking in gains.
+
+"""
 
         sections.append(instructions)
 

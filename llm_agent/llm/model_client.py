@@ -50,8 +50,8 @@ class ModelClient:
         self._spend_reset_time = datetime.now() + timedelta(days=1)
         self._last_request_time = None
 
-        # Rate limiting (avoid hitting API too fast)
-        self._min_request_interval = 1.0  # seconds
+        # Rate limiting (minimal - run at full capacity)
+        self._min_request_interval = 0.5  # Minimal delay for maximum throughput
 
     def _reset_daily_spend_if_needed(self):
         """Reset daily spend counter if new day"""
@@ -178,9 +178,11 @@ class ModelClient:
                     return None
 
             elif response.status_code == 429:
-                # Rate limited
-                logger.warning(f"DeepSeek rate limit (429), waiting 5 seconds...")
-                time.sleep(5)
+                # Rate limited - use exponential backoff with longer delays
+                # DeepSeek often needs 30-60 seconds to reset rate limits
+                wait_time = min(30 * (2 ** retry_count), 120)  # 30s, 60s, 120s max
+                logger.warning(f"DeepSeek rate limit (429), waiting {wait_time} seconds (exponential backoff)...")
+                time.sleep(wait_time)
 
                 if retry_count < self.max_retries:
                     return self.query(prompt, max_tokens, temperature, retry_count + 1)

@@ -1,6 +1,33 @@
-# Quick Reference
+## RBI Agent - Strategy Discovery
 
-## 🔄 Swap Prompts (Experiment with Strategies)
+### View Discovered Strategies
+```bash
+python3 rbi_agent/show_discovered_strategies.py
+```
+
+### Check Discovery Health
+```bash
+python3 rbi_agent/health_check.py
+```
+
+### Start Discovery (2 hours)
+```bash
+nohup python3 rbi_agent/auto_discover_strategies.py --hours 2 --check-interval 30 > logs/rbi_discovery.log 2>&1 &
+```
+
+### Monitor Discovery Logs
+```bash
+tail -f logs/rbi_auto_discovery.log
+```
+
+### View Proven Strategies (JSON)
+```bash
+cat rbi_agent/proven_strategies.json | jq .
+```
+
+---
+
+## Bot Management
 
 ```bash
 # List available prompt versions

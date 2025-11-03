@@ -32,7 +32,13 @@ logger = logging.getLogger(__name__)
 
 
 class MarketDataAggregator:
-    """Orchestrates all data sources for LLM trading agent"""
+    """Orchestrates all data sources for LLM trading agent
+    
+    NOTE (2025-11-03): Cambrian candlestick/OHLCV data is DISABLED.
+    - Candlestick data: Pacifica API only (via PacificaDataFetcher)
+    - Cambrian usage: Deep42 analysis only (macro context, NOT candlestick data)
+    - RBI agent: Uses Cambrian for backtesting (separate system)
+    """
 
     def __init__(
         self,
@@ -45,7 +51,7 @@ class MarketDataAggregator:
         Initialize market data aggregator
 
         Args:
-            cambrian_api_key: Cambrian API key for macro context
+            cambrian_api_key: Cambrian API key for macro context (Deep42 only, NOT candlestick data)
             interval: Candle interval for technical analysis (default: 15m)
             candle_limit: Number of candles to fetch (default: 100)
             macro_refresh_hours: Macro context refresh interval (default: 12)
@@ -54,8 +60,10 @@ class MarketDataAggregator:
         self.candle_limit = candle_limit
 
         # Initialize fetchers
+        # NOTE: Pacifica is the ONLY source for candlestick/OHLCV data
         self.pacifica = PacificaDataFetcher()
         self.oi_fetcher = OIDataFetcher()
+        # Cambrian used ONLY for Deep42 (market intelligence), NOT candlestick data
         self.macro_fetcher = MacroContextFetcher(
             cambrian_api_key=cambrian_api_key,
             refresh_interval_hours=macro_refresh_hours
@@ -81,7 +89,8 @@ class MarketDataAggregator:
                 - indicators: dict (RSI, MACD, SMA, etc.)
                 - kline_df: pd.DataFrame (raw OHLCV with indicators)
         """
-        # Fetch Pacifica data
+        # Fetch Pacifica data (ONLY source for candlestick/OHLCV data)
+        # NOTE: Cambrian candlestick data is disabled - see class docstring
         pacifica_data = self.pacifica.fetch_market_data(
             symbol=symbol,
             interval=self.interval,

@@ -22,9 +22,10 @@
 |------|--------|---------|--------------|
 | `README.md` | ✅ ACTIVE | Project overview and quickstart | Oct 2025 |
 | `CLAUDE.md` | ✅ ACTIVE | Development guide for Claude Code | Oct 30, 2025 |
-| `PROGRESS.md` | ✅ ACTIVE | Project progress log with prompt version history | Oct 31, 2025 |
+| `PROGRESS.md` | ✅ ACTIVE | Project progress log with prompt version history | Nov 1, 2025 |
 | `USER_REFERENCE.md` | ✅ ACTIVE | Quick command reference for daily use | Oct 31, 2025 |
 | `PROMPT_EXPERIMENTS.md` | ✅ ACTIVE | Guide for prompt experimentation and swapping | Oct 31, 2025 |
+| `AGENTS.md` | ✅ ACTIVE | AI agent collaboration guide | Nov 1, 2025 |
 
 ### Bot Status & Configuration
 | File | Status | Purpose | Last Updated |
@@ -70,6 +71,71 @@
 | `README.md` | ✅ ACTIVE | - | - | Bot documentation |
 
 **⚠️ IMPORTANT**: All legacy bots have been replaced by the LLM Trading Bot in `/llm_agent/`
+
+---
+
+## `/rbi_agent/` - Research-Based Inference Agent ⭐ NEW
+
+**Status**: ✅ ACTIVE - MVP Implemented  
+**Date**: 2025-11-01  
+**Purpose**: Automated strategy discovery and backtesting system  
+**Inspiration**: Moon Dev's RBI agent concept
+
+### Files
+| File | Status | Purpose |
+|------|--------|---------|
+| `cambrian_fetcher.py` | ✅ ACTIVE | Cambrian API data fetcher (multi-venue OHLCV) |
+| `rbi_agent.py` | ✅ ACTIVE | Main RBI agent class (`RBIAgent`, `StrategyBacktester`) |
+| `README.md` | ✅ ACTIVE | Complete documentation |
+| `EXAMPLES.md` | ✅ ACTIVE | Usage examples and integration patterns |
+| `QUICK_REFERENCE.md` | ✅ ACTIVE | Quick reference guide |
+| `FILE_INDEX.md` | ✅ ACTIVE | File index and references |
+| `IMPLEMENTATION_SUMMARY.md` | ✅ ACTIVE | Implementation summary |
+| `BACKTEST_SUITE.md` | ✅ ACTIVE | Backtest suite documentation |
+| `DATA_SOURCE_ANALYSIS.md` | ✅ ACTIVE | Data source analysis (Pacifica vs Cambrian) |
+| `DATA_SOURCE_SUMMARY.md` | ✅ ACTIVE | Quick data source comparison |
+| `DATA_COMPARISON_RESULTS.md` | ✅ ACTIVE | Data accuracy verification results |
+| `MIGRATION_COMPLETE.md` | ✅ ACTIVE | Cambrian migration documentation |
+| `backtest_suite.py` | ✅ ACTIVE | Strategy backtesting suite (19 strategies) |
+| `auto_discover_strategies.py` | ✅ ACTIVE | Automated strategy discovery runner |
+| `check_backtest_status.py` | ✅ ACTIVE | Monitor backtest progress |
+| `show_discovered_strategies.py` | ✅ ACTIVE | View discovered strategies summary |
+| `health_check.py` | ✅ ACTIVE | Health check for discovery system |
+| `compare_data_sources.py` | ✅ ACTIVE | Data accuracy comparison tool |
+| `proven_strategies.json` | ✅ ACTIVE | Discovered proven strategies (created) |
+| `__init__.py` | ✅ ACTIVE | Package initialization |
+
+### Key Features
+- **Strategy Discovery**: LLM generates backtest code from natural language descriptions
+- **Automated Backtesting**: Tests strategies on historical data
+- **⭐ Cambrian Integration**: Uses Cambrian API for multi-venue aggregated data (with Pacifica fallback)
+- **Performance Metrics**: Calculates return %, win rate, Sharpe ratio, max drawdown
+- **Pass/Fail Validation**: Only saves strategies that meet thresholds
+
+### Dependencies (Read-Only Access)
+- `llm_agent/data/pacifica_fetcher.py` - Historical data fetching (fallback)
+- `llm_agent/data/indicator_calculator.py` - Technical indicators
+- `llm_agent/llm/model_client.py` - LLM for code generation
+- `rbi_agent/cambrian_fetcher.py` - Cambrian API data fetcher ⭐ NEW
+
+### Usage
+```bash
+python -m rbi_agent.rbi_agent \
+    --strategy "Buy when RSI < 30" \
+    --symbols SOL ETH BTC \
+    --days 30
+```
+
+### Safety
+- ✅ **Does NOT modify live bot code**
+- ✅ **Read-only access to data fetchers**
+- ✅ **Completely isolated from `llm_agent/`**
+- ✅ **No live trading**
+
+### Documentation
+- `rbi_agent/README.md` - Full documentation
+- `rbi_agent/EXAMPLES.md` - Usage examples
+- `research/moon-dev/NEW_INSIGHTS_ANALYSIS.md` - Moon Dev analysis
 
 ---
 
