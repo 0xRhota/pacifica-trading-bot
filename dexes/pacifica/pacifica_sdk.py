@@ -206,3 +206,26 @@ class PacificaSDK:
                 "text": response.text,
                 "success": False
             }
+
+    def get_balance(self) -> Dict:
+        """
+        Get account balance and equity information
+
+        Returns:
+            API response dict with balance data including:
+            - balance: Total balance
+            - account_equity: Balance + unrealized P&L
+            - available_to_spend: Available for new positions
+            - total_margin_used: Currently used margin
+        """
+        url = f"{self.base_url}/account?account={self.account_address}"
+        response = requests.get(url)
+
+        try:
+            return response.json()
+        except:
+            return {
+                "status_code": response.status_code,
+                "text": response.text,
+                "success": False
+            }

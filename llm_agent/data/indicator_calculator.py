@@ -126,12 +126,87 @@ class IndicatorCalculator:
             "bb_width": bb.bollinger_wband()
         })
 
-    def calculate_all_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+    def calculate_ema(self, df: pd.DataFrame, period: int = 20, column: str = "close") -> pd.Series:
         """
-        Calculate all indicators for a DataFrame
+        Calculate Exponential Moving Average (EMA)
+
+        Args:
+            df: DataFrame with OHLCV data
+            period: EMA period (default: 20)
+            column: Column to calculate EMA on (default: close)
+
+        Returns:
+            Series with EMA values
+        """
+        return ta.trend.ema_indicator(df[column], window=period)
+
+    def calculate_stochastic(self, df: pd.DataFrame, k_period: int = 14, d_period: int = 3) -> pd.DataFrame:
+        """
+        Calculate Stochastic Oscillator (%K and %D)
+
+        Args:
+            df: DataFrame with OHLCV data (needs high, low, close)
+            k_period: %K period (default: 14)
+            d_period: %D period (default: 3)
+
+        Returns:
+            DataFrame with columns: stoch_k, stoch_d
+        """
+        stoch = ta.momentum.StochasticOscillator(
+            high=df['high'],
+            low=df['low'],
+            close=df['close'],
+            window=k_period,
+            smooth_window=d_period
+        )
+        return pd.DataFrame({
+            "stoch_k": stoch.stoch(),
+            "stoch_d": stoch.stoch_signal()
+        })
+
+    def calculate_atr(self, df: pd.DataFrame, period: int = 14) -> pd.Series:
+        """
+        Calculate Average True Range (ATR)
+
+        Args:
+            df: DataFrame with OHLCV data (needs high, low, close)
+            period: ATR period (default: 14)
+
+        Returns:
+            Series with ATR values
+        """
+        return ta.volatility.average_true_range(
+            high=df['high'],
+            low=df['low'],
+            close=df['close'],
+            window=period
+        )
+
+    def calculate_adx(self, df: pd.DataFrame, period: int = 14) -> pd.Series:
+        """
+        Calculate Average Directional Index (ADX)
+
+        Args:
+            df: DataFrame with OHLCV data (needs high, low, close)
+            period: ADX period (default: 14)
+
+        Returns:
+            Series with ADX values
+        """
+        return ta.trend.adx(
+            high=df['high'],
+            low=df['low'],
+            close=df['close'],
+            window=period
+        )
+
+    def calculate_all_indicators(self, df: pd.DataFrame, timeframe: str = "5m") -> pd.DataFrame:
+        """
+        Calculate all indicators for a DataFrame based on timeframe
 
         Args:
             df: DataFrame with OHLCV data (columns: timestamp, open, high, low, close, volume)
+            timeframe: Timeframe for indicator selection ("5m" or "4h")
 
         Returns:
             DataFrame with all indicators added
@@ -144,49 +219,79 @@ class IndicatorCalculator:
             # Make a copy to avoid modifying original
             result = df.copy()
 
-            # SMA (20 and 50 periods)
-            result['sma_20'] = self.calculate_sma(df, period=20)
-            result['sma_50'] = self.calculate_sma(df, period=50)
+            if timeframe == "5m":
+                # 5-minute indicators
+                # EMA (20 period)
+                result['ema_20'] = self.calculate_ema(df, period=20)
 
-            # Check if SMA20 > SMA50 (trend indicator)
-            result['sma_20_above_50'] = result['sma_20'] > result['sma_50']
+                # MACD (already implemented)
+                macd_df = self.calculate_macd(df)
+                result['macd'] = macd_df['macd']
+                result['macd_signal'] = macd_df['macd_signal']
+                result['macd_diff'] = macd_df['macd_diff']
 
-            # RSI (14 period)
-            result['rsi'] = self.calculate_rsi(df, period=14)
+                # RSI (14 period)
+                result['rsi'] = self.calculate_rsi(df, period=14)
 
-            # MACD
-            macd_df = self.calculate_macd(df)
-            result['macd'] = macd_df['macd']
-            result['macd_signal'] = macd_df['macd_signal']
-            result['macd_diff'] = macd_df['macd_diff']
+                # Bollinger Bands (20 period, 2 std dev)
+                bb_df = self.calculate_bollinger_bands(df, period=20, std_dev=2.0)
+                result['bb_upper'] = bb_df['bb_upper']
+                result['bb_middle'] = bb_df['bb_middle']
+                result['bb_lower'] = bb_df['bb_lower']
+                result['bb_width'] = bb_df['bb_width']
 
-            # Bollinger Bands (20 period, 2 std dev)
-            bb_df = self.calculate_bollinger_bands(df, period=20, std_dev=2.0)
-            result['bb_upper'] = bb_df['bb_upper']
-            result['bb_middle'] = bb_df['bb_middle']
-            result['bb_lower'] = bb_df['bb_lower']
-            result['bb_width'] = bb_df['bb_width']
+                # Stochastic Oscillator
+                stoch_df = self.calculate_stochastic(df, k_period=14, d_period=3)
+                result['stoch_k'] = stoch_df['stoch_k']
+                result['stoch_d'] = stoch_df['stoch_d']
 
-            # Additional derived indicators
-            # Price position within Bollinger Bands (0-1 scale)
-            result['bb_position'] = (
-                (result['close'] - result['bb_lower']) /
-                (result['bb_upper'] - result['bb_lower'])
-            ).clip(0, 1)
+            elif timeframe == "4h":
+                # 4-hour indicators
+                # EMA (20 period)
+                result['ema_20'] = self.calculate_ema(df, period=20)
 
-            logger.info(f"✅ Calculated indicators for {len(result)} candles")
+                # ATR (14 period)
+                result['atr'] = self.calculate_atr(df, period=14)
+
+                # ADX (14 period)
+                result['adx'] = self.calculate_adx(df, period=14)
+
+            else:
+                # Default: calculate all indicators (backward compatibility)
+                result['sma_20'] = self.calculate_sma(df, period=20)
+                result['sma_50'] = self.calculate_sma(df, period=50)
+                result['sma_20_above_50'] = result['sma_20'] > result['sma_50']
+                result['rsi'] = self.calculate_rsi(df, period=14)
+                macd_df = self.calculate_macd(df)
+                result['macd'] = macd_df['macd']
+                result['macd_signal'] = macd_df['macd_signal']
+                result['macd_diff'] = macd_df['macd_diff']
+                bb_df = self.calculate_bollinger_bands(df, period=20, std_dev=2.0)
+                result['bb_upper'] = bb_df['bb_upper']
+                result['bb_middle'] = bb_df['bb_middle']
+                result['bb_lower'] = bb_df['bb_lower']
+                result['bb_width'] = bb_df['bb_width']
+                result['bb_position'] = (
+                    (result['close'] - result['bb_lower']) /
+                    (result['bb_upper'] - result['bb_lower'])
+                ).clip(0, 1)
+
+            logger.info(f"✅ Calculated {timeframe} indicators for {len(result)} candles")
             return result
 
         except Exception as e:
             logger.error(f"Error calculating indicators: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return df
 
-    def get_latest_values(self, df: pd.DataFrame) -> dict:
+    def get_latest_values(self, df: pd.DataFrame, timeframe: str = "5m") -> dict:
         """
         Extract latest indicator values for LLM prompt
 
         Args:
             df: DataFrame with indicators calculated
+            timeframe: Timeframe for indicator selection ("5m" or "4h")
 
         Returns:
             Dict with latest indicator values
@@ -195,18 +300,44 @@ class IndicatorCalculator:
             return {}
 
         latest = df.iloc[-1]
+        values = {"price": latest.get('close')}
 
-        return {
-            "price": latest.get('close'),
-            "sma_20": latest.get('sma_20'),
-            "sma_50": latest.get('sma_50'),
-            "sma_20_above_50": latest.get('sma_20_above_50'),
-            "rsi": latest.get('rsi'),
-            "macd": latest.get('macd'),
-            "macd_signal": latest.get('macd_signal'),
-            "macd_diff": latest.get('macd_diff'),
-            "bb_upper": latest.get('bb_upper'),
-            "bb_middle": latest.get('bb_middle'),
-            "bb_lower": latest.get('bb_lower'),
-            "bb_position": latest.get('bb_position')
-        }
+        if timeframe == "5m":
+            # 5-minute indicators
+            values.update({
+                "ema_20": latest.get('ema_20'),
+                "rsi": latest.get('rsi'),
+                "macd": latest.get('macd'),
+                "macd_signal": latest.get('macd_signal'),
+                "macd_diff": latest.get('macd_diff'),
+                "bb_upper": latest.get('bb_upper'),
+                "bb_middle": latest.get('bb_middle'),
+                "bb_lower": latest.get('bb_lower'),
+                "bb_width": latest.get('bb_width'),
+                "stoch_k": latest.get('stoch_k'),
+                "stoch_d": latest.get('stoch_d'),
+            })
+        elif timeframe == "4h":
+            # 4-hour indicators
+            values.update({
+                "ema_20": latest.get('ema_20'),
+                "atr": latest.get('atr'),
+                "adx": latest.get('adx'),
+            })
+        else:
+            # Default: backward compatibility
+            values.update({
+                "sma_20": latest.get('sma_20'),
+                "sma_50": latest.get('sma_50'),
+                "sma_20_above_50": latest.get('sma_20_above_50'),
+                "rsi": latest.get('rsi'),
+                "macd": latest.get('macd'),
+                "macd_signal": latest.get('macd_signal'),
+                "macd_diff": latest.get('macd_diff'),
+                "bb_upper": latest.get('bb_upper'),
+                "bb_middle": latest.get('bb_middle'),
+                "bb_lower": latest.get('bb_lower'),
+                "bb_position": latest.get('bb_position')
+            })
+
+        return values

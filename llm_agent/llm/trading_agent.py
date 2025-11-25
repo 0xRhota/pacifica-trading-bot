@@ -25,10 +25,10 @@ import logging
 from typing import Optional, Dict, List
 
 from .model_client import ModelClient
-from .prompt_formatter import PromptFormatter
 from .response_parser import ResponseParser
 from .deep42_tool import Deep42Tool
 from .token_analysis_tool import TokenAnalysisTool
+from ..config_prompts import get_prompt_formatter, get_active_strategy_info, PROMPT_STRATEGIES  # V2 config system (one level up)
 
 logger = logging.getLogger(__name__)
 
@@ -43,18 +43,20 @@ class LLMTradingAgent:
         model: str = "deepseek-chat",
         max_retries: int = 2,
         daily_spend_limit: float = 10.0,
-        max_positions: int = 3
+        max_positions: int = 3,
+        prompt_strategy: str = None  # Override config if specified
     ):
         """
         Initialize LLM trading agent
 
         Args:
-            deepseek_api_key: DeepSeek API key
+            deepseek_api_key: DeepSeek API key (or OpenRouter key for qwen-max)
             cambrian_api_key: Cambrian API key for Deep42 queries
-            model: Model name (default: deepseek-chat)
+            model: Model name (default: deepseek-chat, qwen-max for Alpha Arena winner)
             max_retries: Number of retries on parse failure (default: 2)
             daily_spend_limit: Max USD to spend per day (default: $10)
             max_positions: Max open positions allowed (default: 3)
+            prompt_strategy: Prompt strategy override (e.g., v8_pure_pnl)
         """
         self.max_retries = max_retries
         self.max_positions = max_positions
@@ -67,7 +69,36 @@ class LLMTradingAgent:
             daily_spend_limit=daily_spend_limit
         )
 
-        self.prompt_formatter = PromptFormatter()
+        # V2: Use config system for prompt selection (easy rollback)
+        # Can be overridden by prompt_strategy parameter
+        if prompt_strategy and prompt_strategy in PROMPT_STRATEGIES:
+            # Use specified strategy instead of config default
+            import importlib
+            strategy = PROMPT_STRATEGIES[prompt_strategy]
+            module = importlib.import_module(strategy['file'])
+            formatter_class = getattr(module, strategy['class'])
+
+            # Check if strategy has a file to load
+            strategy_file = strategy.get('strategy_file')
+            if strategy_file:
+                import os
+                # Try to find the file relative to project root
+                if not os.path.isabs(strategy_file):
+                    # Assume relative to project root
+                    import sys
+                    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                    strategy_file = os.path.join(project_root, strategy_file)
+
+                self.prompt_formatter = formatter_class(strategy_file=strategy_file)
+            else:
+                self.prompt_formatter = formatter_class()
+
+            logger.info(f"🎯 Active prompt strategy: {prompt_strategy} - {strategy['description']}")
+        else:
+            self.prompt_formatter = get_prompt_formatter()
+            strategy_info = get_active_strategy_info()
+            logger.info(f"🎯 Active prompt strategy: {strategy_info['version']} - {strategy_info['description']}")
+
         self.response_parser = ResponseParser()
 
         # Initialize Deep42 tool for macro market analysis

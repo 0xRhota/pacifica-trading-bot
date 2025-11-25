@@ -25,19 +25,16 @@ logger = logging.getLogger(__name__)
 class ResponseParser:
     """Parse and validate LLM trading decisions"""
 
-    # Valid Pacifica symbols
-    VALID_SYMBOLS = [
-        "ETH", "BTC", "SOL", "PUMP", "XRP", "HYPE", "DOGE", "FARTCOIN",
-        "ENA", "BNB", "SUI", "kBONK", "PENGU", "AAVE", "LINK", "kPEPE",
-        "LTC", "LDO", "UNI", "CRV", "WLFI", "AVAX", "ASTER", "XPL",
-        "2Z", "PAXG", "ZEC", "MON"
-    ]
+    # NOTE: Symbol validation removed - trading_bot validates against actual DEX markets
+    # This allows parser to work with any DEX (Pacifica, Lighter, etc.)
+    VALID_SYMBOLS = []  # Empty list - validation happens in trading_bot._validate_decisions()
 
     def __init__(self):
         """Initialize response parser"""
         # Regex patterns for parsing single decision
+        # NO_TRADE is alias for NOTHING (used by v8_pure_pnl strategy)
         self.decision_pattern = re.compile(
-            r"DECISION:\s*(BUY|SELL|CLOSE|NOTHING)(?:\s+(\w+))?",
+            r"DECISION:\s*(BUY|SELL|CLOSE|NOTHING|NO_TRADE)(?:\s+(\w+))?",
             re.IGNORECASE
         )
         self.confidence_pattern = re.compile(
@@ -49,12 +46,14 @@ class ResponseParser:
             re.IGNORECASE | re.DOTALL
         )
         # Regex pattern for parsing multiple decisions (new format)
+        # Note: Symbol can be like "BTC" or "BTC/USDT-P" - need to match both formats
+        # NO_TRADE is alias for NOTHING (used by v8_pure_pnl strategy)
         self.token_pattern = re.compile(
-            r"TOKEN:\s*(\w+)",
+            r"TOKEN:\s*([\w/\-]+)",
             re.IGNORECASE
         )
         self.multi_decision_pattern = re.compile(
-            r"TOKEN:\s*(\w+)\s*\n\s*DECISION:\s*(BUY|SELL|CLOSE|NOTHING)(?:\s+(\w+))?\s*\n\s*CONFIDENCE:\s*([0-9.]+)\s*\n\s*REASON:\s*(.+?)(?=\n\s*TOKEN:|$)",
+            r"TOKEN:\s*([\w/\-]+)\s*\n\s*DECISION:\s*(BUY|SELL|CLOSE|NOTHING|NO_TRADE)(?:\s+([\w/\-]+))?\s*\n\s*CONFIDENCE:\s*([0-9.]+)\s*\n\s*REASON:\s*(.+?)(?=\n\s*TOKEN:|$)",
             re.IGNORECASE | re.DOTALL | re.MULTILINE
         )
 
@@ -85,20 +84,23 @@ class ResponseParser:
         action = decision_match.group(1).upper()
         symbol = decision_match.group(2).upper() if decision_match.group(2) else None
 
+        # NO_TRADE is alias for NOTHING (used by v8_pure_pnl strategy)
+        if action == "NO_TRADE":
+            action = "NOTHING"
+
         # Validate action
         if action not in ["BUY", "SELL", "CLOSE", "NOTHING"]:
             logger.error(f"Invalid action: {action}")
             return None
 
         # Validate symbol (required for BUY/SELL/CLOSE)
+        # Note: Symbol validation against markets is done by trading_bot using adapter
+        # This parser just checks symbol exists, not that it's valid for specific DEX
         if action in ["BUY", "SELL", "CLOSE"]:
             if not symbol:
                 logger.error(f"Missing symbol for {action} decision")
                 return None
-
-            if symbol not in self.VALID_SYMBOLS:
-                logger.error(f"Invalid symbol: {symbol} (not in Pacifica markets)")
-                return None
+            # Symbol validation against actual markets happens in trading_bot._validate_decisions
 
         # Symbol should be None for NOTHING
         if action == "NOTHING":
@@ -247,23 +249,26 @@ class ResponseParser:
             symbol_in_decision = match.group(3).upper() if match.group(3) else None
             confidence_str = match.group(4)
             reason = match.group(5).strip()
-            
+
             # Use symbol from TOKEN line if not in DECISION line
             symbol = symbol_in_decision or token
-            
+
+            # NO_TRADE is alias for NOTHING (used by v8_pure_pnl strategy)
+            if action == "NO_TRADE":
+                action = "NOTHING"
+
             # Validate action
             if action not in ["BUY", "SELL", "CLOSE", "NOTHING"]:
                 logger.warning(f"Invalid action for {token}: {action}")
                 continue
             
-            # Validate symbol
+            # Validate symbol exists (basic check)
             if action in ["BUY", "SELL", "CLOSE"]:
                 if not symbol:
                     logger.warning(f"Missing symbol for {action} decision for {token}")
                     continue
-                if symbol not in self.VALID_SYMBOLS:
-                    logger.warning(f"Invalid symbol: {symbol} (not in Pacifica markets)")
-                    continue
+                # NOTE: Symbol validation against actual DEX markets happens in trading_bot._validate_decisions()
+                # We don't validate here to allow parser to work with any DEX (Pacifica, Lighter, etc.)
             
             # Parse confidence
             try:

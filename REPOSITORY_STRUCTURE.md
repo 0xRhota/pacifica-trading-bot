@@ -1,538 +1,535 @@
-# Repository Structure & Documentation Index
+# Repository Structure & Complete Inventory
 
-**Last Updated**: October 30, 2025
-**Purpose**: Complete map of repository organization with status indicators
-
----
-
-## Status Legend
-
-- ✅ **ACTIVE** - Currently in use, maintained
-- 📚 **REFERENCE** - Historical/reference documentation, not actively used
-- 🗄️ **ARCHIVED** - Superseded by newer implementations, kept for reference
-- 🚧 **WIP** - Work in progress, incomplete
-- ⚠️ **OBSOLETE** - No longer relevant, candidate for removal
+**Last Updated**: November 24, 2025
+**Purpose**: Complete map of repository organization and file inventory
 
 ---
 
-## Root Level Files
+## Quick Navigation
 
-### Active Documentation
-| File | Status | Purpose | Last Updated |
-|------|--------|---------|--------------|
-| `README.md` | ✅ ACTIVE | Project overview and quickstart | Oct 2025 |
-| `CLAUDE.md` | ✅ ACTIVE | Development guide for Claude Code | Oct 30, 2025 |
-| `PROGRESS.md` | ✅ ACTIVE | Project progress log with prompt version history | Nov 1, 2025 |
-| `USER_REFERENCE.md` | ✅ ACTIVE | Quick command reference for daily use | Oct 31, 2025 |
-| `PROMPT_EXPERIMENTS.md` | ✅ ACTIVE | Guide for prompt experimentation and swapping | Oct 31, 2025 |
-| `AGENTS.md` | ✅ ACTIVE | AI agent collaboration guide | Nov 1, 2025 |
-
-### Bot Status & Configuration
-| File | Status | Purpose | Last Updated |
-|------|--------|---------|--------------|
-| `LLM_BOT_STATUS.md` | ✅ ACTIVE | Current LLM bot status and deployment info | Oct 30, 2025 |
-| `DYNAMIC_TOKEN_ANALYSIS.md` | ✅ ACTIVE | Token discovery and position re-evaluation docs | Oct 30, 2025 |
-| `DEEP42_CUSTOM_QUERIES.md` | ✅ ACTIVE | Deep42 custom macro query implementation | Oct 30, 2025 |
-| `DATA_SOURCES_SUMMARY.md` | ✅ ACTIVE | Quick reference for all data sources with attribution | Oct 30, 2025 |
-
-### Historical Planning Documents
-| File | Status | Purpose | Notes |
-|------|--------|---------|-------|
-| `MOON_DEV_RESEARCH.md` | 📚 REFERENCE | Analysis of Moon Dev's trading agent | Completed research, informational |
-| `DATA_PIPELINE_IMPLEMENTATION_PLAN.md` | 📚 REFERENCE | Original data pipeline planning | Superseded by actual implementation |
-| `RESEARCH_INDEX.md` | 📚 REFERENCE | Index of Moon Dev research | Historical context |
-
-### Security & Audit
-| File | Status | Purpose | Last Updated |
-|------|--------|---------|--------------|
-| `SECURITY_AUDIT_REPORT.md` | ✅ ACTIVE | Security audit findings and fixes | Oct 29, 2025 |
-
-### Configuration Files
-| File | Status | Purpose |
-|------|--------|---------|
-| `.env` | ✅ ACTIVE | Environment variables (gitignored) |
-| `.env.example` | ✅ ACTIVE | Template for .env |
-| `.env.README` | ✅ ACTIVE | Environment setup guide |
-| `.gitignore` | ✅ ACTIVE | Git ignore rules |
-| `.mcp.json` | ✅ ACTIVE | MCP server configuration |
-| `config.py` | ✅ ACTIVE | Trading configuration (lot sizes, markets, etc.) |
-| `requirements.txt` | ✅ ACTIVE | Python dependencies |
-
----
-
-## `/bots/` - Active Trading Bots
-
-**Status**: 🗄️ ARCHIVED (Legacy bots - replaced by LLM agent)
-**Purpose**: Old bot files kept for reference
-
-| File | Status | DEX | Strategy | Notes |
-|------|--------|-----|----------|-------|
-| `vwap_lighter_bot.py` | 🗄️ ARCHIVED | Lighter | VWAP | Not used - reference only |
-| `README.md` | ✅ ACTIVE | - | - | Bot documentation |
-
-**⚠️ IMPORTANT**: All legacy bots have been replaced by the LLM Trading Bot in `/llm_agent/`
-
----
-
-## `/rbi_agent/` - Research-Based Inference Agent ⭐ NEW
-
-**Status**: ✅ ACTIVE - MVP Implemented  
-**Date**: 2025-11-01  
-**Purpose**: Automated strategy discovery and backtesting system  
-**Inspiration**: Moon Dev's RBI agent concept
-
-### Files
-| File | Status | Purpose |
-|------|--------|---------|
-| `cambrian_fetcher.py` | ✅ ACTIVE | Cambrian API data fetcher (multi-venue OHLCV) |
-| `rbi_agent.py` | ✅ ACTIVE | Main RBI agent class (`RBIAgent`, `StrategyBacktester`) |
-| `README.md` | ✅ ACTIVE | Complete documentation |
-| `EXAMPLES.md` | ✅ ACTIVE | Usage examples and integration patterns |
-| `QUICK_REFERENCE.md` | ✅ ACTIVE | Quick reference guide |
-| `FILE_INDEX.md` | ✅ ACTIVE | File index and references |
-| `IMPLEMENTATION_SUMMARY.md` | ✅ ACTIVE | Implementation summary |
-| `BACKTEST_SUITE.md` | ✅ ACTIVE | Backtest suite documentation |
-| `DATA_SOURCE_ANALYSIS.md` | ✅ ACTIVE | Data source analysis (Pacifica vs Cambrian) |
-| `DATA_SOURCE_SUMMARY.md` | ✅ ACTIVE | Quick data source comparison |
-| `DATA_COMPARISON_RESULTS.md` | ✅ ACTIVE | Data accuracy verification results |
-| `MIGRATION_COMPLETE.md` | ✅ ACTIVE | Cambrian migration documentation |
-| `backtest_suite.py` | ✅ ACTIVE | Strategy backtesting suite (19 strategies) |
-| `auto_discover_strategies.py` | ✅ ACTIVE | Automated strategy discovery runner |
-| `check_backtest_status.py` | ✅ ACTIVE | Monitor backtest progress |
-| `show_discovered_strategies.py` | ✅ ACTIVE | View discovered strategies summary |
-| `health_check.py` | ✅ ACTIVE | Health check for discovery system |
-| `compare_data_sources.py` | ✅ ACTIVE | Data accuracy comparison tool |
-| `proven_strategies.json` | ✅ ACTIVE | Discovered proven strategies (created) |
-| `__init__.py` | ✅ ACTIVE | Package initialization |
-
-### Key Features
-- **Strategy Discovery**: LLM generates backtest code from natural language descriptions
-- **Automated Backtesting**: Tests strategies on historical data
-- **⭐ Cambrian Integration**: Uses Cambrian API for multi-venue aggregated data (with Pacifica fallback)
-- **Performance Metrics**: Calculates return %, win rate, Sharpe ratio, max drawdown
-- **Pass/Fail Validation**: Only saves strategies that meet thresholds
-
-### Dependencies (Read-Only Access)
-- `llm_agent/data/pacifica_fetcher.py` - Historical data fetching (fallback)
-- `llm_agent/data/indicator_calculator.py` - Technical indicators
-- `llm_agent/llm/model_client.py` - LLM for code generation
-- `rbi_agent/cambrian_fetcher.py` - Cambrian API data fetcher ⭐ NEW
-
-### Usage
-```bash
-python -m rbi_agent.rbi_agent \
-    --strategy "Buy when RSI < 30" \
-    --symbols SOL ETH BTC \
-    --days 30
+```
+pacifica-trading-bot/
+├── 📄 Core Documentation (Root)
+│   ├── README.md              # Project overview
+│   ├── CLAUDE.md              # Development guide
+│   └── REPOSITORY_STRUCTURE.md # ⭐ This file
+│
+├── 🤖 ACTIVE BOT
+│   └── lighter_agent/         # ✅ Lighter Trading Bot (LIVE)
+│
+├── 🧠 SHARED MODULES
+│   ├── llm_agent/             # LLM decision engine & indicators
+│   ├── dexes/                 # DEX SDKs
+│   └── utils/                 # Shared utilities
+│
+├── 🔮 FUTURE
+│   ├── future_features/       # Planned features research
+│   ├── pacifica_agent/        # Future Pacifica bot (paused)
+│   └── llm_agent/             # Legacy LLM bot (paused)
+│
+├── 📚 DOCUMENTATION
+│   ├── docs/                  # Project documentation
+│   └── research/              # Organized research notes
+│
+├── 🛠️ INFRASTRUCTURE
+│   ├── config.py              # Global config
+│   ├── trade_tracker.py       # Trade tracking
+│   ├── scripts/               # Utility scripts
+│   ├── logs/                  # Bot logs (gitignored)
+│   └── data/                  # Data exports
+│
+└── 🗄️ ARCHIVE
+    └── archive/               # Historical code
 ```
 
-### Safety
-- ✅ **Does NOT modify live bot code**
-- ✅ **Read-only access to data fetchers**
-- ✅ **Completely isolated from `llm_agent/`**
-- ✅ **No live trading**
+---
 
-### Documentation
-- `rbi_agent/README.md` - Full documentation
-- `rbi_agent/EXAMPLES.md` - Usage examples
-- `research/moon-dev/NEW_INSIGHTS_ANALYSIS.md` - Moon Dev analysis
+## Root Directory Files
+
+### Core Documentation
+| File | Purpose | Status |
+|------|---------|--------|
+| `README.md` | Project overview and quickstart | ✅ Active |
+| `CLAUDE.md` | Development guide for AI assistants | ✅ Active |
+| `REPOSITORY_STRUCTURE.md` | This file - complete repo map | ✅ Active |
+
+### Configuration
+| File | Purpose | Status |
+|------|---------|--------|
+| `config.py` | Global trading configuration | ✅ Active |
+| `trade_tracker.py` | Trade tracking (used by bots) | ✅ Active |
+| `requirements.txt` | Python dependencies | ✅ Active |
+| `.env` | API keys (gitignored) | ✅ Active |
+| `.env.example` | API key template | ✅ Active |
+| `.gitignore` | Git ignore patterns | ✅ Active |
+| `.mcp.json` | MCP server configuration | ✅ Active |
 
 ---
 
-## `/llm_agent/` - LLM Trading Bot System
+## Active Bot: Lighter Agent
 
-**Status**: ✅ ACTIVE - **THIS IS THE ONLY PRODUCTION BOT**
-**Purpose**: LLM-powered trading agent (new architecture)
-**Running**: PID 83713 | Mode: LIVE | Log: `logs/llm_bot.log`
+**Directory**: `lighter_agent/`
+**Status**: ✅ **LIVE IN PRODUCTION**
+**Last Updated**: November 19, 2025
 
 ### Structure
 ```
-llm_agent/
-├── bot_llm.py                  # ✅ Main entry point for LLM bot
+lighter_agent/
+├── bot_lighter.py              # ⭐ Main entry point
 ├── data/
-│   ├── macro_context_fetcher.py   # ✅ CoinGecko + macro data
-│   ├── market_data_fetcher.py     # ✅ Pacifica market data
-│   └── oi_data_fetcher.py         # ✅ Open interest data
-├── execution/
-│   ├── pacifica_executor.py       # ✅ Trade execution
-│   └── position_manager.py        # ✅ Position tracking
-├── llm/
-│   ├── trading_agent.py            # ✅ Main LLM decision logic
-│   ├── prompt_formatter.py         # ✅ Prompt construction (lines 160-191)
-│   ├── token_analysis_tool.py      # ✅ Token discovery & Deep42 queries
-│   └── deep42_client.py            # ✅ Deep42 API client
-└── prompts_archive/               # ✅ NEW: Prompt version archive
-    ├── v1_baseline_conservative.txt  # ✅ Original conservative prompt
-    ├── v2_aggressive_swing.txt       # ✅ Aggressive swing trading prompt
-    └── README.md                     # ✅ Archive documentation
+│   ├── __init__.py
+│   ├── market_data_aggregator.py  # Fetch market data from Lighter
+│   └── deep42_client.py        # Deep42 macro sentiment (optional)
+└── execution/
+    ├── __init__.py
+    ├── trade_executor.py       # Execute trades on Lighter
+    └── hard_exit_rules.py      # Force exit rules (profit/stop targets)
 ```
 
-**Features**:
-- Dynamic token discovery (218 HyperLiquid markets)
-- LLM selects 3 tokens to analyze deeply each cycle
-- Deep42 sentiment/news/technical analysis
-- Position re-evaluation with "close or hold?" guidance
-- Custom Deep42 macro queries for time-specific intelligence
+### Dependencies
+- **Imports from**: `llm_agent/llm/` (LLM decision engine)
+- **Imports from**: `llm_agent/data/` (Indicators, OI, funding)
+- **Uses**: `dexes/lighter/lighter_sdk.py` (Lighter SDK)
+- **Uses**: `trade_tracker.py` (Track trades)
 
-**Running Status**: Live bot (PID: 88790), 5-minute cycles
-
----
-
-## `/strategies/` - Strategy Implementations
-
-**Status**: ✅ ACTIVE
-**Purpose**: Trading strategy classes
-
-| File | Status | Type | Notes |
-|------|--------|------|-------|
-| `base_strategy.py` | ✅ ACTIVE | Abstract base | Strategy interface |
-| `vwap_strategy.py` | ✅ ACTIVE | VWAP + OB imbalance | Long/short, active |
-| `long_short.py` | 🚧 WIP | Directional | Work in progress |
-| `basic_long_only.py` | 🗄️ ARCHIVED | Long-only | Superseded |
-| `README.md` | ✅ ACTIVE | - | Strategy docs with performance data |
+### Key Features
+- 101+ markets dynamically loaded from Lighter API
+- Zero trading fees
+- AI-driven decisions with comprehensive market data
+- Deep42 macro context (optional)
+- Strategy switching system (logged to `logs/strategy_switches.log`)
+- Hard exit rules (profit targets, stop losses)
 
 ---
 
-## `/dexes/` - DEX SDK Wrappers
+## Shared Modules
 
-**Status**: ✅ ACTIVE
-**Purpose**: Exchange-specific API integrations
+### LLM Agent (`llm_agent/`)
 
-### `/dexes/lighter/`
-| File | Status | Purpose |
-|------|--------|---------|
-| `lighter_sdk.py` | ✅ ACTIVE | Lighter DEX SDK wrapper |
+**Status**: ✅ **SHARED BY ALL BOTS**
+**Purpose**: LLM decision engine and market data processing
 
-**Features**: Market orders, stop-loss, take-profit, account balance, positions
+#### Structure
+```
+llm_agent/
+├── llm/                        # LLM Decision Engine
+│   ├── __init__.py
+│   ├── model_client.py         # DeepSeek Chat API client
+│   ├── prompt_formatter.py     # Format prompts for LLM
+│   ├── response_parser.py      # Parse LLM decisions
+│   └── trading_agent.py        # Main LLM agent
+│
+├── data/                       # Market Data Processing
+│   ├── __init__.py
+│   ├── indicator_calculator.py # RSI, MACD, EMA calculations
+│   ├── oi_fetcher.py          # Open Interest from Cambrian
+│   ├── funding_fetcher.py     # Funding rates from Cambrian
+│   └── deep42_client.py       # Deep42 macro sentiment
+│
+├── prompts_archive/            # Historical prompts
+│   ├── v4_momentum_strategy.txt
+│   └── v5_swing_strategy_pacifica.txt
+│
+└── config_prompts.py          # Prompt configurations
+```
 
-### `/dexes/pacifica/`
-| File | Status | Purpose |
-|------|--------|---------|
-| `pacifica_sdk.py` | ✅ ACTIVE | Pacifica DEX SDK wrapper |
-
----
-
-## `/scripts/` - Utility Scripts
-
-**Status**: ✅ ACTIVE
-**Purpose**: Testing and utility scripts
-
-### Root Scripts
-| File | Status | Purpose |
-|------|--------|---------|
-| `swap_prompt.sh` | ✅ ACTIVE | **NEW**: Swap between prompt versions easily |
-| `view_decisions.py` | ✅ ACTIVE | View bot decision summary |
-| `view_decision_details.py` | ✅ ACTIVE | View detailed decision breakdown |
-| `validate_bot_startup.py` | ✅ ACTIVE | Validate bot started successfully |
-
-### `/scripts/general/`
-| File | Status | Purpose |
-|------|--------|---------|
-| `sync_tracker.py` | ✅ ACTIVE | Sync trade tracker with exchange |
-| `place_order_now.py` | ✅ ACTIVE | Manual order placement |
-
-### `/scripts/lighter/`
-**Status**: ✅ ACTIVE
-**Purpose**: Lighter DEX testing scripts
-
-Files: `check_account.py`, `check_balance.py`, `explore_sdk.py`, `find_account_index.py`, `find_api_key.py`, `get_account_index.py`, `register_api_key.py`, `setup_api_key.py`, `test_connection.py`, `test_order.py`, `test_trade.py`
-
-### `/scripts/pacifica/`
-**Status**: (No files yet, would contain Pacifica-specific scripts)
+#### Dependencies
+- **Used by**: `lighter_agent/`, `pacifica_agent/`, `llm_agent/` (legacy)
+- **Requires**: DeepSeek API key, Cambrian API key
+- **Provides**: AI decision-making, market indicators, macro context
 
 ---
 
-## `/research/` - Research & Analysis
+### DEX SDKs (`dexes/`)
 
-**Status**: ✅ ACTIVE
-**Purpose**: Strategy research, backtesting, market analysis
+**Status**: ✅ **ACTIVE**
+**Purpose**: Wrapper SDKs for decentralized exchanges
 
-### Root Research Files
-| File | Status | Topic | Notes |
-|------|--------|-------|-------|
-| `AGENT_LIGHTNING_RESEARCH.md` | ✅ ACTIVE | Agent Lightning framework | Oct 30, 2025 - Complete analysis |
-| `DEEPSEEK_API_TEST.md` | 📚 REFERENCE | DeepSeek API testing | API validation |
-| `FUNDING_RATE_IMPLEMENTATION.md` | 📚 REFERENCE | Funding rate implementation | Implementation guide |
-| `FUNDING_RATE_QUICK_REFERENCE.md` | 📚 REFERENCE | Funding rate quick ref | API reference |
-| `FUNDING_RATE_RESEARCH.md` | 📚 REFERENCE | Funding rate research | Deep dive |
-| `FUNDING_RATE_RESEARCH_INDEX.md` | 📚 REFERENCE | Funding rate index | Research index |
-| `KNOWLEDGE_GAP_ANALYSIS.md` | 📚 REFERENCE | Knowledge gaps | Assessment |
-| `LONG_SHORT_STRATEGY_RESEARCH.md` | 📚 REFERENCE | Long/short strategy | Strategy research |
-| `MULTI_DEX_ARCHITECTURE.md` | 📚 REFERENCE | Multi-DEX design | Architecture |
-| `PHASE_0_VALIDATION_REPORT.md` | 📚 REFERENCE | Phase 0 validation | Validation report |
-| `PRD_FINAL_REVIEW.md` | 📚 REFERENCE | PRD review | Product review |
-| `PROFITABLE_STRATEGIES_RESEARCH.md` | 📚 REFERENCE | Profitable strategies | Strategy ideas |
-| `VWAP_STRATEGY_IMPLEMENTATION.md` | 📚 REFERENCE | VWAP implementation | Implementation guide |
-| `FOLDER_STRUCTURE_PLAN.md` | 📚 REFERENCE | Folder organization | Planning doc |
-| `README.md` | ✅ ACTIVE | Research directory guide | - |
+#### Structure
+```
+dexes/
+├── lighter/
+│   ├── __init__.py
+│   └── lighter_sdk.py          # Lighter DEX SDK wrapper
+│
+├── pacifica/
+│   ├── __init__.py
+│   ├── pacifica_sdk.py         # Pacifica DEX SDK wrapper
+│   └── adapter.py              # Pacifica API adapter
+│
+└── hibachi/                    # ✅ NEW: November 24, 2025
+    ├── __init__.py
+    └── hibachi_sdk.py          # Hibachi DEX SDK wrapper
+```
 
-### `/research/cambrian/` - Cambrian API Research
-**Status**: 📚 REFERENCE
-**Files**: `DEEP42_FINDINGS.md`, `DEEP42_PERPDEX_ANALYSIS.md`, `DEEP_RESEARCH_NOTES.md`, `ENDPOINT_TEST_RESULTS.md`, `FINDINGS.md`, `INTEGRATION_PLAN.md`, `README.md`
+#### Lighter SDK
+- **File**: `dexes/lighter/lighter_sdk.py`
+- **Features**: Get balances, positions, market data, create orders
+- **Account**: Index 341823, API Key Index 2
+- **Markets**: 101+ perpetual pairs
 
-**Purpose**: Historical Cambrian API research (completed)
+#### Pacifica SDK
+- **File**: `dexes/pacifica/pacifica_sdk.py`
+- **Features**: Get balances, positions, create orders
+- **Account**: `8saejVsbEBraGvxbJGxrosv4QKMfR2i8f59GFAnMXfMc`
+- **Status**: Working but bot is paused
 
-### `/research/lighter/` - Lighter DEX Research
-**Status**: 📚 REFERENCE
-**Files**: `LIGHTER_QUICK_START.md`, `LIGHTER_REQUIREMENTS.md`, `LIGHTER_SETUP_COMPLETE.md`, `LIGHTER_STATUS.md`, `WALLET_SECURITY.md`, `WHEN_YOU_WAKE_UP.md`
-
-**Purpose**: Lighter DEX integration research (completed)
-
----
-
-## `/docs/` - Core Documentation
-
-**Status**: ✅ ACTIVE
-**Purpose**: Project documentation
-
-| File | Status | Purpose | Last Updated |
-|------|--------|---------|--------------|
-| `DATA_SOURCES.md` | ✅ ACTIVE | Complete API reference (Cambrian, Pacifica, funding rates) | Oct 2025 |
-| `LLM_AGENT_STRATEGY_PLAN.md` | 📚 REFERENCE | LLM agent planning | Historical |
-| `PROGRESS.md` | 📚 REFERENCE | Progress tracking | Superseded by root PROGRESS.md |
-| `SETUP.md` | ✅ ACTIVE | Setup instructions | - |
-| `STRATEGY_MANAGEMENT.md` | ✅ ACTIVE | Strategy management guide | - |
+#### Hibachi SDK ⭐ NEW
+- **File**: `dexes/hibachi/hibachi_sdk.py`
+- **Features**: Get balances, positions, market data, create orders, HMAC authentication
+- **Account**: ID 22919, Balance $58.08 USDT
+- **Markets**: 15 perpetual pairs (BTC, ETH, SOL, SUI, XRP, etc.)
+- **Status**: ✅ **COMPLETE - Ready for bot integration**
+- **Docs**: `research/hibachi/API_REFERENCE.md`
 
 ---
 
-## `/archive/` - Archived Code
+### Utilities (`utils/`)
 
-**Status**: 🗄️ ARCHIVED
-**Purpose**: Superseded implementations kept for reference
+**Status**: ✅ **ACTIVE**
 
-### Root Archive Files
-| File | Archived Date | Reason | Can Delete? |
-|------|---------------|--------|-------------|
-| `live_bot.py` | Oct 2025 | Replaced by live_pacifica.py | No - reference |
-| `live_bot_lighter.py` | Oct 2025 | Replaced by vwap_lighter_bot.py | No - reference |
-| `DUAL_BOTS_RUNNING.md` | Oct 2025 | Historical status doc | Yes - if desired |
-| `LIGHTER_WORKING.md` | Oct 2025 | Historical status doc | Yes - if desired |
-| `README.md` | ✅ ACTIVE | Archive documentation | No - explains archive |
-
-### `/archive/2025-10-30/`
-| File | Archived Date | Reason | Can Delete? |
-|------|---------------|--------|-------------|
-| `live_pacifica.py.ARCHIVED` | Oct 30, 2025 | ⚠️ **OBSOLETE** - Replaced by LLM bot | No - reference |
-
-**⚠️ CRITICAL**: `live_pacifica.py` was the old Pacifica bot. It has been fully replaced by the LLM Trading Bot (`llm_agent/bot_llm.py`).
-
-### `/archive/old_bots/`
-Archived bot implementations
-
-### `/archive/old_strategies/`
-Archived strategy implementations
-
-**⚠️ IMPORTANT**: Do NOT import from or run archived files. They are obsolete. Check git history for context.
+#### Files
+```
+utils/
+├── __init__.py
+└── shared_rate_limiter.py      # Shared rate limiter for APIs
+```
 
 ---
 
-## `/logs/` - Log Files
+## Future Features
 
-**Status**: ✅ ACTIVE
-**Purpose**: Bot execution logs
+### Directory: `future_features/`
 
-**Structure**:
+**Status**: 🔮 **RESEARCH COMPLETE, AWAITING IMPLEMENTATION**
+
+#### Structure
+```
+future_features/
+├── README.md                   # Future features overview
+└── cross_dex_arbitrage.md      # Cross-DEX spread arbitrage research
+```
+
+#### Cross-DEX Spread Arbitrage
+- **Research Status**: Complete
+- **Priority**: Medium
+- **Requirements**: Paradex or Extended account setup
+- **Description**: Monitor spreads between Lighter, Extended, Paradex
+- **Strategy**: Delta-neutral arbitrage (long cheap, short expensive)
+
+---
+
+## Paused/Legacy Bots
+
+### Pacifica Agent (`pacifica_agent/`)
+
+**Status**: 🔮 **PAUSED - FUTURE PHASE 2**
+
+#### Structure
+```
+pacifica_agent/
+├── bot_pacifica.py             # Pacifica bot (paused)
+├── data/
+│   ├── market_data_aggregator.py
+│   └── deep42_client.py
+└── execution/
+    └── trade_executor.py
+```
+
+- **Why Paused**: Focusing on Lighter bot first
+- **Future Plan**: Apply Lighter improvements to Pacifica
+- **Status**: Working but not running
+
+### Legacy LLM Agent (`llm_agent/`)
+
+**Note**: `llm_agent/` directory contains BOTH shared modules (llm/, data/) AND legacy bot code
+
+#### Legacy Bot Files (Not Used)
+```
+llm_agent/
+├── bot_llm.py                  # 🗄️ Legacy unified bot (unused)
+└── execution/                  # 🗄️ Legacy execution (unused)
+    ├── __init__.py
+    └── trade_executor.py
+```
+
+These files exist but are NOT used. Each bot (lighter_agent, pacifica_agent) has its own execution layer.
+
+---
+
+## Documentation
+
+### Docs Directory (`docs/`)
+
+**Status**: ✅ **ACTIVE**
+
+#### Structure
+```
+docs/
+├── AGENTS.md                   # Bot agent documentation
+├── ARCHITECTURE.md             # System architecture
+├── USER_REFERENCE.md           # Quick command reference
+├── PROGRESS.md                 # Project progress log
+├── TODO.md                     # Todo list
+├── DEPLOYMENT_COMPLETE.md      # Deployment notes
+├── DATA_SOURCES_SUMMARY.md     # API data sources
+├── STRATEGY_MANAGEMENT.md      # Strategy switching system
+└── composer_agent/             # Composer agent docs
+    └── COMPOSER_DASHBOARD.md
+```
+
+---
+
+### Research Directory (`research/`)
+
+**Status**: ✅ **ORGANIZED**
+**Last Cleanup**: November 24, 2025
+
+#### Structure
+```
+research/
+├── README.md                   # Research directory guide
+│
+├── Active Research (By Topic)
+│   ├── agent-lightning/        # Agent Lightning framework
+│   ├── cambrian/               # Cambrian API integration
+│   ├── deep42/                 # Deep42 macro sentiment
+│   ├── deepseek/               # DeepSeek LLM API
+│   ├── funding-rates/          # Funding rate analysis
+│   ├── hibachi/                # ⭐ NEW: Hibachi DEX integration
+│   │   ├── API_REFERENCE.md
+│   │   └── INTEGRATION_COMPLETE.md
+│   ├── lighter/                # Lighter DEX research
+│   ├── moon-dev/               # Moon Dev RBI agent
+│   ├── pacifica/               # Pacifica DEX research
+│   ├── scripts/                # Research scripts
+│   ├── sentient-example-questions/ # Sentient AI examples
+│   └── strategies/             # Strategy research
+│
+└── Completed/Historical Research
+    ├── Nov2024-lighter-research/   # Nov 2024 Lighter integration
+    ├── Nov2024-v2-research/        # Nov 2024 V2 bot research
+    ├── implementation/             # Implementation docs
+    ├── archived/                   # Archived research
+    └── misc/                       # Miscellaneous research
+```
+
+---
+
+## Infrastructure
+
+### Logs Directory (`logs/`)
+
+**Status**: ✅ **ACTIVE** (gitignored)
+
+#### Key Log Files
 ```
 logs/
-├── llm_bot.log              # ✅ Current LLM bot log
-├── pacifica_live.log        # ✅ Current Pacifica bot log
-├── bot_sessions.log         # ✅ Condensed session start/stop log
-├── trades/                  # ✅ Trade-specific logs
-└── *.log                    # Historical logs
+├── lighter_bot.log             # ⭐ Current Lighter bot log
+├── strategy_switches.log       # Strategy change history
+├── trades/                     # Trade history by strategy
+│   ├── lighter_current.json    # Current trades
+│   └── archive/                # Archived trades by strategy
+└── (many historical log files)
 ```
 
-**Gitignored**: Yes (*.log)
-**Rotation**: Max 7 days or 100MB
+**Note**: Log files are gitignored and not committed
 
 ---
 
-## `/pacifica/` - Pacifica Module (Subfolder Architecture)
+### Data Directory (`data/`)
 
-**Status**: 📚 REFERENCE (appears to be duplicate structure)
-**Purpose**: Alternative Pacifica module organization
+**Status**: ✅ **ACTIVE**
 
-**Note**: This appears to be a duplicate/experimental structure. Primary code is in root-level `/dexes/pacifica/` and `/bots/`. Consider consolidating or archiving.
-
----
-
-## `/utils/` - Shared Utilities
-
-**Status**: ✅ ACTIVE
-**Purpose**: Shared utility functions
-
-| File | Status | Purpose |
-|------|--------|---------|
-| `vwap.py` | ✅ ACTIVE | Session VWAP calculation |
-| `logger.py` | ✅ ACTIVE | Logging configuration |
+#### Structure
+```
+data/
+└── lighter_exports/            # Lighter trade exports (CSV)
+```
 
 ---
 
-## Root Level Infrastructure Files
+### Scripts Directory (`scripts/`)
 
-| File | Status | Purpose |
-|------|--------|---------|
-| `config.py` | ✅ ACTIVE | Trading configuration (lot sizes, market IDs) |
-| `pacifica_bot.py` | ✅ ACTIVE | PacificaAPI wrapper for market data |
-| `risk_manager.py` | ✅ ACTIVE | Position sizing and risk controls |
-| `trade_tracker.py` | ✅ ACTIVE | Trade tracking and P&L calculation |
-| `monitor.py` | ✅ ACTIVE | Bot monitoring script |
-| `setup.py` | ✅ ACTIVE | Package setup |
+**Status**: ✅ **ACTIVE**
+**Purpose**: Testing, debugging, and utility scripts
+
+#### Structure
+```
+scripts/
+├── general/                    # General utilities
+│   ├── clean_tracker.py
+│   └── switch_strategy.py
+├── lighter/                    # Lighter-specific scripts
+├── pacifica/                   # Pacifica-specific scripts
+├── hibachi/                    # ⭐ NEW: Hibachi-specific scripts
+├── rbi_agent/                  # RBI agent scripts
+│   ├── fix_and_run_backtest.py
+│   └── show_all_returns.py
+├── research/                   # Research scripts
+└── test_hibachi_markets.py     # ⭐ NEW: Hibachi SDK test script
+```
 
 ---
 
-## Hidden/Config Directories
+### Configuration Directory (`config/`)
 
-### `/.claude/`
-**Status**: ✅ ACTIVE
-**Purpose**: Claude Code configuration
-**Files**: `settings.json` (tool allowlist, preferences)
+**Status**: ✅ **ACTIVE**
 
-### `/.taskmaster/`
-**Status**: ✅ ACTIVE
-**Purpose**: Task Master AI configuration
-**Structure**:
+#### Structure
+```
+config/
+└── (configuration files)
+```
+
+---
+
+## Archive
+
+### Archive Directory (`archive/`)
+
+**Status**: 🗄️ **HISTORICAL REFERENCE ONLY**
+
+#### Structure
+```
+archive/
+├── 2025-10-30/                 # Oct 30 old bot code
+├── 2025-11-03-cleanup/         # Nov 3 cleanup
+├── 2025-11-03-docs/            # Nov 3 old docs
+├── 2025-11-05-cleanup/         # Nov 5 cleanup
+├── 2025-11-07-old-pacifica-framework/  # Old Pacifica framework
+├── 2025-11-07-v2-deployment-docs/      # Old deployment docs
+├── old_bots/                   # Old bot executables
+└── old_strategies/             # Old strategy implementations
+```
+
+**⚠️ IMPORTANT**: Do NOT use any code from archive/. All old bots have been replaced.
+
+---
+
+## External Dependencies
+
+### Moon Dev Reference (`moon-dev-reference/`)
+
+**Status**: 📚 **REFERENCE**
+**Purpose**: Moon Dev framework reference (git submodule)
+
+#### Structure
+```
+moon-dev-reference/
+├── docs/                       # Moon Dev documentation
+├── src/                        # Moon Dev source code
+└── moon-dev-reference/         # Submodule files
+```
+
+**Note**: This is a git submodule, not actively used in production
+
+---
+
+## Hidden Directories
+
+### Task Master (`.taskmaster/`)
+
+**Status**: ✅ **ACTIVE** (if using Task Master)
+
 ```
 .taskmaster/
-├── CLAUDE.md              # ✅ Task Master integration guide
-├── config.json            # ✅ AI model config
-├── tasks/                 # ✅ Task files
-├── docs/                  # ✅ PRD documents
-├── reports/               # ✅ Analysis reports
-└── templates/             # ✅ Templates
+├── tasks/                      # Task files
+│   └── tasks.json
+├── docs/                       # Task Master docs
+├── reports/                    # Analysis reports
+├── config.json                 # Task Master config
+└── CLAUDE.md                   # Task Master integration guide
 ```
 
-### `/.git/`
-**Status**: ✅ ACTIVE
-**Purpose**: Git repository data
+### Claude (`.claude/`)
+
+**Status**: ✅ **ACTIVE** (if configured)
+
+```
+.claude/
+├── settings.json               # Claude Code settings
+└── commands/                   # Custom slash commands
+```
 
 ---
 
-## Cleanup Recommendations
+## File Statistics
 
-### Safe to Archive (Move to `/archive/` with timestamp)
-1. `DATA_PIPELINE_IMPLEMENTATION_PLAN.md` → Already reference, could archive
-2. `RESEARCH_INDEX.md` → Historical, could archive
-3. `/pacifica/` subfolder → Appears duplicate, investigate and consolidate or archive
+### Root Level
+- **Total markdown files**: 3 (README, CLAUDE, REPOSITORY_STRUCTURE)
+- **Total Python files**: 2 (config.py, trade_tracker.py)
+- **Total config files**: 5 (.env, .env.example, .gitignore, .mcp.json, requirements.txt)
 
-### Safe to Remove (After backup)
-1. `live_bot_vwap_lighter.log` (root level) → Empty file, can delete
-2. `/archive/DUAL_BOTS_RUNNING.md` → Transient status doc
-3. `/archive/LIGHTER_WORKING.md` → Transient status doc
+### Active Bot (lighter_agent/)
+- **Total Python files**: 6
+- **Lines of code**: ~1500
 
-### Keep As-Is
-- All `/research/` files (valuable historical context)
-- All active bot and strategy files
-- All configuration files
-- Current documentation
+### Shared Modules (llm_agent/)
+- **Total Python files**: 10+
+- **Lines of code**: ~3000
 
----
-
-## Documentation Navigation Guide
-
-### "I want to..."
-
-**...understand the project**:
-- Start: `README.md`
-- Then: `CLAUDE.md` (development guide)
-
-**...see what's currently running**:
-- `LLM_BOT_STATUS.md` (LLM bot status)
-- `logs/bot_sessions.log` (session history)
-
-**...understand the LLM bot**:
-- `DYNAMIC_TOKEN_ANALYSIS.md` (token discovery)
-- `DEEP42_CUSTOM_QUERIES.md` (macro queries)
-- `DATA_SOURCES_SUMMARY.md` (data sources)
-
-**...look up API endpoints**:
-- `docs/DATA_SOURCES.md` (complete API reference)
-- `DATA_SOURCES_SUMMARY.md` (quick reference)
-
-**...understand strategies**:
-- `strategies/README.md` (strategy docs with performance)
-
-**...find research on a topic**:
-- `research/AGENT_LIGHTNING_RESEARCH.md` (Agent Lightning)
-- `research/cambrian/` (Cambrian API)
-- `research/lighter/` (Lighter DEX)
-
-**...see historical decisions**:
-- `PROGRESS.md` (high-level progress)
-- `MOON_DEV_RESEARCH.md` (Moon Dev analysis)
-
-**...check security**:
-- `SECURITY_AUDIT_REPORT.md` (audit findings)
-
-**...set up environment**:
-- `.env.README` (environment setup)
-- `.env.example` (template)
+### Research Directory
+- **Total subdirectories**: 21
+- **Total markdown files**: 50+
 
 ---
 
-## File Naming Conventions
+## Development Workflow
 
-### Documentation (.md)
-- **UPPERCASE.md** (root level) - Major documentation, quick reference
-- **lowercase.md** (subdirectories) - Module-specific docs
-- **README.md** - Directory guides
+### Adding New Features
+1. Research in `research/[topic]/`
+2. If future feature → document in `future_features/`
+3. Implement in `lighter_agent/` or `pacifica_agent/`
+4. Test with scripts in `scripts/`
+5. Deploy and log to `logs/`
+6. Update this file (REPOSITORY_STRUCTURE.md)
 
-### Python (.py)
-- **snake_case.py** - All Python files
-- **bot_name.py** (bots/) - Bot executables
-- **strategy_name.py** (strategies/) - Strategy implementations
-- **module_name.py** - Modules and utilities
+### Deprecating Code
+1. Move to `archive/[YYYY-MM-DD]/`
+2. Add comment in replacement referencing archive
+3. Update this file
+4. Update CLAUDE.md if needed
 
-### Logs (.log)
-- **bot_name.log** - Current active logs
-- **bot_name_YYYY-MM-DD.log** - Historical logs
-
----
-
-## Maintenance Guidelines
-
-### When Adding New Files
-
-1. **Documentation**: Place in appropriate directory (`/docs/`, `/research/`)
-2. **Bots**: Place in `/bots/` with descriptive name
-3. **Strategies**: Place in `/strategies/` with clear name
-4. **Scripts**: Place in `/scripts/{dex}/` or `/scripts/general/`
-5. **Update this file**: Add entry to relevant section
-
-### When Archiving Files
-
-1. Move to `/archive/` with subdirectory if needed
-2. Add timestamp to filename (optional)
-3. Update `/archive/README.md` with reason
-4. Add reference in this document
-
-### When Deprecating Documentation
-
-1. Change status to 📚 REFERENCE or 🗄️ ARCHIVED
-2. Add note explaining superseding document/implementation
-3. Keep file (don't delete) for historical context
+### Research Workflow
+1. Create topic folder in `research/[topic]/`
+2. Document findings in markdown
+3. When complete, move to `research/archived/` or `research/Nov2024-*/`
+4. Update `research/README.md`
 
 ---
 
-## Quick Status Check
+## Key Principles
 
-**Active Bots**: 2
-- `bots/live_pacifica.py` (running, PID: 55194)
-- `llm_agent/bot_llm.py` (running, PID: 88790)
-
-**Active Strategies**: 2
-- `strategies/vwap_strategy.py` (VWAP + OB imbalance)
-- `strategies/long_short.py` (WIP)
-
-**Active DEXes**: 2
-- Pacifica (main)
-- Lighter (testing)
-
-**Documentation Status**: Well-organized, needs minor cleanup
-
-**Archived Files**: Properly documented in `/archive/`
-
-**Research Files**: 24 documents (mix of active and reference)
+1. **Single Active Bot**: Only `lighter_agent/` runs in production
+2. **Shared Modules**: `llm_agent/llm/` and `llm_agent/data/` are shared
+3. **Clean Root**: Only 3 markdown files in root (README, CLAUDE, REPOSITORY_STRUCTURE)
+4. **Organized Research**: Topic-based folders, completed research timestamped
+5. **Everything Tracked**: This file tracks ALL directories and files
+6. **Archive Don't Delete**: Move old code to archive/ with timestamp
 
 ---
 
-**End of Repository Structure Document**
+## Future Plans
+
+### Short Term (Next Week)
+- Continue optimizing Lighter bot strategies
+- Monitor for new profitable patterns
+- Document strategy performance
+- **NEW**: Build Hibachi bot agent (SDK ready, $58.08 funded)
+
+### Medium Term (Next Month)
+- Deploy Hibachi bot (15 markets, 0.045% taker fee)
+- Consider cross-DEX spread arbitrage (if profitable)
+- Evaluate Extended or Paradex integration
+
+### Long Term (Phase 2)
+- Apply Lighter improvements to Pacifica bot
+- Multi-exchange orchestration (Lighter + Hibachi + Pacifica)
+- Dual/triple airdrop farming potential
+
+---
+
+**Last Updated**: November 24, 2025
+**Maintained By**: AI Agent (Claude Code)
+**Update Frequency**: After major changes or reorganization

@@ -27,6 +27,7 @@ class TradeEntry:
     exit_reason: Optional[str] = None
     status: str = "open"  # "open", "closed", "failed"
     notes: Optional[str] = None
+    confidence: Optional[float] = None  # Track LLM confidence at entry
 
 class TradeTracker:
     """DEX-aware trade tracker with automatic rotation"""
@@ -87,7 +88,8 @@ class TradeTracker:
         print(f"📦 Rotated {self.dex} trade log to {archive_file}")
 
     def log_entry(self, order_id: Optional[str], symbol: str, side: str,
-                  size: float, entry_price: float, notes: str = None) -> str:
+                  size: float, entry_price: float, notes: str = None,
+                  confidence: float = None) -> str:
         """
         Log a new trade entry
 
@@ -106,7 +108,8 @@ class TradeTracker:
             size=size,
             entry_price=entry_price,
             status="open",
-            notes=notes
+            notes=notes,
+            confidence=confidence
         )
 
         self.trades.append(asdict(trade))
@@ -145,6 +148,21 @@ class TradeTracker:
                 return
 
         print(f"Warning: Could not find open trade with order_id {order_id}")
+    
+    def get_order_id_for_symbol(self, symbol: str) -> Optional[str]:
+        """Get order_id for the most recent open trade for symbol"""
+        # Search in reverse order (most recent first)
+        for trade in reversed(self.trades):
+            if trade.get('symbol') == symbol and trade.get('status') == 'open':
+                return trade.get('order_id')
+        return None
+    
+    def get_open_trade_for_symbol(self, symbol: str) -> Optional[Dict]:
+        """Get the most recent open trade for symbol"""
+        for trade in reversed(self.trades):
+            if trade.get('symbol') == symbol and trade.get('status') == 'open':
+                return trade
+        return None
 
     def get_open_trades(self) -> List[Dict]:
         return [t for t in self.trades if t['status'] == 'open']

@@ -3,6 +3,10 @@
 logs/
 *.log.*
 
+# Trade data (all in logs/trades/)
+trade_tracker.json
+*.json.backup*
+
 # Python
 __pycache__/
 *.py[cod]
@@ -69,3 +73,4 @@ node_modules/
 # Task files
 # tasks.json
 # tasks/ 
+research/agent-lightning-TEST

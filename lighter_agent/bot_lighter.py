@@ -60,7 +60,7 @@ class LighterTradingBot:
     def __init__(
         self,
         cambrian_api_key: str,
-        deepseek_api_key: str,
+        llm_api_key: str,
         lighter_private_key: str,
         lighter_account_index: int,
         lighter_api_key_index: int,
@@ -69,14 +69,16 @@ class LighterTradingBot:
         position_size: float = 2.0,  # $2 per trade (reduced for v4 momentum strategy)
         max_positions: int = 15,  # Same as Pacifica bot
         max_position_age_minutes: int = 240,  # 4 hours (v4 strategy: let winners run longer)
-        favor_zk_zec: bool = False  # Disabled: ZK/ZEC are proven losers (35.7% and 34.5% WR)
+        favor_zk_zec: bool = False,  # Disabled: ZK/ZEC are proven losers (35.7% and 34.5% WR)
+        model: str = "deepseek-chat",
+        prompt_strategy: str = "v1_original"
     ):
         """
         Initialize Lighter trading bot
 
         Args:
             cambrian_api_key: Cambrian API key for macro context
-            deepseek_api_key: DeepSeek API key for LLM decisions
+            llm_api_key: LLM API key (DeepSeek or OpenRouter depending on model)
             lighter_private_key: Lighter API private key
             lighter_account_index: Lighter account index
             lighter_api_key_index: Lighter API key index
@@ -86,6 +88,8 @@ class LighterTradingBot:
             max_positions: Max open positions (default: 15)
             max_position_age_minutes: Max position age in minutes before auto-close (default: 240)
             favor_zk_zec: Enable ZK/ZEC position weighting (default: False)
+            model: LLM model to use (default: deepseek-chat, qwen-max for Alpha Arena winner)
+            prompt_strategy: Prompt strategy version (default: v1_original, v8_pure_pnl for PnL focus)
         """
         self.dry_run = dry_run
         self.check_interval = check_interval
@@ -103,13 +107,15 @@ class LighterTradingBot:
 
         # Initialize LLM agent (same as Pacifica - uses shared rate limiter)
         self.llm_agent = LLMTradingAgent(
-            deepseek_api_key=deepseek_api_key,
+            deepseek_api_key=llm_api_key,  # Now accepts any LLM API key
             cambrian_api_key=cambrian_api_key,
-            model="deepseek-chat",
+            model=model,  # Support qwen-max or deepseek-chat
             max_retries=2,
             daily_spend_limit=10.0,  # Shared with Pacifica bot
-            max_positions=max_positions
+            max_positions=max_positions,
+            prompt_strategy=prompt_strategy  # Support v8_pure_pnl
         )
+        logger.info(f"🤖 LLM Model: {model}")
 
         # Store SDK initialization params (will initialize in async context)
         self.lighter_private_key = lighter_private_key
@@ -595,6 +601,7 @@ class LighterTradingBot:
                 logger.info("=" * 80)
 
                 valid_decisions = []
+                nothing_decisions = 0  # Track NOTHING/NO_TRADE decisions (v8 Pure PnL)
                 current_positions = open_positions.copy() if open_positions else []
 
                 for idx, parsed in enumerate(parsed_decisions, 1):
@@ -608,6 +615,13 @@ class LighterTradingBot:
                     logger.info(f"  Action: {action}")
                     logger.info(f"  Confidence: {confidence:.2f}")
                     logger.info(f"  Reason: {reason[:100]}...")  # First 100 chars
+
+                    # NOTHING/NO_TRADE decisions are always valid (v8 Pure PnL strategy)
+                    if action == "NOTHING":
+                        logger.info(f"  ✅ ACCEPTED: NO_TRADE decision - waiting for better setup")
+                        nothing_decisions += 1
+                        # Don't add to valid_decisions - this just means "do nothing this cycle"
+                        continue
 
                     # HARD RULE: Prevent LLM from closing before minimum hold time
                     if action == "CLOSE" and symbol:
@@ -696,12 +710,19 @@ class LighterTradingBot:
                 logger.info(f"📊 VALIDATION SUMMARY:")
                 logger.info(f"  Total decisions from LLM: {len(parsed_decisions)}")
                 logger.info(f"  Passed validation: {len(valid_decisions)}")
-                logger.info(f"  Failed validation: {len(parsed_decisions) - len(valid_decisions)}")
+                logger.info(f"  NO_TRADE decisions: {nothing_decisions}")
+                logger.info(f"  Failed validation: {len(parsed_decisions) - len(valid_decisions) - nothing_decisions}")
                 logger.info("=" * 80)
                 logger.info("")
 
+                # Accept if we have valid decisions OR valid NO_TRADE decisions
                 if valid_decisions:
                     decisions = valid_decisions
+                    break
+                elif nothing_decisions > 0:
+                    # All decisions were NO_TRADE - this is valid for v8 Pure PnL strategy
+                    logger.info(f"🎯 v8 Pure PnL: All {nothing_decisions} decision(s) were NO_TRADE - no trades this cycle")
+                    decisions = []  # Empty list = no trades but not an error
                     break
                 else:
                     if parsed_decisions:
@@ -712,12 +733,18 @@ class LighterTradingBot:
                 # All retries failed
                 decisions = None
 
-            if not decisions:
+            # None = LLM failed, [] = valid NO_TRADE decision
+            if decisions is None:
                 logger.error("Failed to get decision from LLM")
                 return
 
+            # Empty list = NO_TRADE decision (v8 Pure PnL strategy)
+            if len(decisions) == 0:
+                logger.info("📊 No trades this cycle (NO_TRADE decision)")
+                # Continue to cycle complete logic, skip execution
+
             # Handle multiple decisions (same as Pacifica)
-            if not isinstance(decisions, list):
+            elif not isinstance(decisions, list):
                 decisions = [decisions]  # Backward compatibility
 
             # Clean LLM decision output with FULL reasoning (not truncated)
@@ -876,6 +903,12 @@ def main():
     parser.add_argument("--dry-run", action="store_true", default=True, help="Dry run mode (no real trades)")
     parser.add_argument("--once", action="store_true", help="Run once and exit (for testing)")
     parser.add_argument("--interval", type=int, default=300, help="Check interval in seconds (default: 300 = 5 min)")
+    parser.add_argument("--model", type=str, default="deepseek-chat",
+                        choices=["deepseek-chat", "qwen-max"],
+                        help="LLM model (default: deepseek-chat, qwen-max = Alpha Arena winner)")
+    parser.add_argument("--prompt", type=str, default="v1_original",
+                        choices=["v1_original", "v7_alpha_arena", "v8_pure_pnl", "v9_qwen_enhanced"],
+                        help="Prompt strategy (default: v1_original, v9_qwen_enhanced = Qwen scoring + funding zones)")
 
     # V4 strategy parameters - momentum-based with longer holds
     parser.add_argument("--max-position-age", type=int, default=240,
@@ -899,28 +932,50 @@ def main():
     
     cambrian_api_key = os.getenv("CAMBRIAN_API_KEY")
     deepseek_api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("DEEPSEEK_KEY")
+    openrouter_api_key = os.getenv("OPEN_ROUTER")
     lighter_private_key = os.getenv("LIGHTER_PRIVATE_KEY") or os.getenv("LIGHTER_API_KEY_PRIVATE")
     lighter_account_index = int(os.getenv("LIGHTER_ACCOUNT_INDEX", "341823"))
     lighter_api_key_index = int(os.getenv("LIGHTER_API_KEY_INDEX", "2"))
 
-    if not all([cambrian_api_key, deepseek_api_key, lighter_private_key]):
+    # Determine which API key to use based on model
+    model = args.model
+    if model == "qwen-max":
+        llm_api_key = openrouter_api_key
+        if not llm_api_key:
+            logger.error("❌ OPEN_ROUTER env var required for qwen-max model")
+            sys.exit(1)
+        logger.info(f"🤖 Using Qwen-Max via OpenRouter (Alpha Arena winner!)")
+    else:
+        llm_api_key = deepseek_api_key
+        logger.info(f"🤖 Using DeepSeek-Chat")
+
+    if not all([cambrian_api_key, llm_api_key, lighter_private_key]):
         logger.error("Missing required environment variables:")
         logger.error("  - CAMBRIAN_API_KEY")
-        logger.error("  - DEEPSEEK_API_KEY or DEEPSEEK_KEY")
+        if model == "qwen-max":
+            logger.error("  - OPEN_ROUTER (for qwen-max)")
+        else:
+            logger.error("  - DEEPSEEK_API_KEY or DEEPSEEK_KEY")
         logger.error("  - LIGHTER_PRIVATE_KEY or LIGHTER_API_KEY_PRIVATE")
         sys.exit(1)
+
+    # Set prompt strategy
+    prompt_strategy = args.prompt
+    logger.info(f"📝 Prompt strategy: {prompt_strategy}")
 
     # Initialize bot
     bot = LighterTradingBot(
         cambrian_api_key=cambrian_api_key,
-        deepseek_api_key=deepseek_api_key,
+        llm_api_key=llm_api_key,
         lighter_private_key=lighter_private_key,
         lighter_account_index=lighter_account_index,
         lighter_api_key_index=lighter_api_key_index,
         dry_run=dry_run,
         check_interval=args.interval,
         max_position_age_minutes=args.max_position_age,  # V4 strategy: 240 min default
-        favor_zk_zec=args.favor_zk_zec  # V4 strategy: disabled by default
+        favor_zk_zec=args.favor_zk_zec,  # V4 strategy: disabled by default
+        model=model,
+        prompt_strategy=prompt_strategy
     )
 
     # Run

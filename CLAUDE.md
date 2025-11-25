@@ -18,67 +18,15 @@ This bot MUST track and display ALL of these data sources in every decision:
 
 ---
 
-## Repository Navigation
+## System Architecture
 
-**📍 START HERE**: See [`REPOSITORY_STRUCTURE.md`](REPOSITORY_STRUCTURE.md) for complete repository map with status indicators.
+**📍 REPOSITORY STRUCTURE**: See [`ARCHITECTURE.md`](ARCHITECTURE.md) for complete system architecture, bot details, and file organization.
 
-### Quick Navigation Tree
-
-```
-pacifica-trading-bot/
-├── 📄 README.md                          # Project overview & quickstart
-├── 📄 CLAUDE.md                          # ⭐ This file - development guide
-├── 📄 REPOSITORY_STRUCTURE.md            # ⭐ Complete repo map & file index
-├── 📄 PROGRESS.md                        # Session log
-│
-├── 🔧 SHARED INFRASTRUCTURE
-│   ├── config.py                        # Global configuration
-│   ├── trade_tracker.py                 # Trade tracking (used by LLM bot)
-│   └── requirements.txt                 # Python dependencies
-│
-├── 🤖 ACTIVE BOT (ONLY ONE)
-│   └── llm_agent/                       # ⭐ LLM Trading Bot (PID: 83713)
-│       ├── bot_llm.py                   # Main entry point
-│       ├── data/                        # Market data aggregation
-│       ├── llm/                         # LLM decision logic
-│       └── execution/                   # Trade execution
-│
-├── 📚 DOCUMENTATION
-│   └── docs/
-│       ├── DATA_SOURCES.md              # Complete API docs
-│       ├── LLM_BOT_STATUS.md           # Current bot status
-│       ├── DYNAMIC_TOKEN_ANALYSIS.md    # Token discovery docs
-│       └── DEEP42_CUSTOM_QUERIES.md     # Deep42 macro queries
-│
-├── 🔬 RESEARCH (Organized by topic)
-│   └── research/
-│       ├── agent-lightning/             # Agent Lightning analysis
-│       ├── moon-dev/                    # Moon Dev research
-│       ├── funding-rates/               # Funding rate research
-│       ├── strategies/                  # Strategy research
-│       ├── cambrian/                    # Cambrian API research
-│       └── lighter/                     # Lighter DEX research
-│
-├── 🛠️ UTILITIES
-│   ├── dexes/                           # DEX SDKs (Pacifica, Lighter)
-│   ├── scripts/                         # Testing/utility scripts
-│   └── pacifica/                        # Pacifica integration
-│
-└── 🗄️ ARCHIVED (ALL OLD BOTS)
-    └── archive/2025-10-30/
-        ├── live_pacifica.py.ARCHIVED    # ⚠️ Old Pacifica bot
-        ├── old-bot-infrastructure/      # Old bot supporting files
-        ├── old-strategies/              # Old strategy implementations
-        ├── old-bots/                    # Old bot executables
-        └── old-scripts/                 # Old utility scripts
-```
-
-**Navigation Tips**:
-- **Active bot**: `llm_agent/bot_llm.py` (PID: 83713) - THIS IS THE ONLY PRODUCTION BOT
-- Bot status: `docs/LLM_BOT_STATUS.md`
-- API docs: `docs/DATA_SOURCES.md`
-- Research: `research/agent-lightning/` (latest)
-- Full repo map: `REPOSITORY_STRUCTURE.md`
+### Quick Navigation
+- **Architecture Overview**: [`ARCHITECTURE.md`](ARCHITECTURE.md) - Complete system design
+- **Bot Commands**: [`USER_REFERENCE.md`](USER_REFERENCE.md) - Quick command reference
+- **API Documentation**: [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md) - API endpoints and usage
+- **Agent Guide**: [`AGENTS.md`](AGENTS.md) - For AI agents collaborating on this codebase
 
 ---
 
@@ -271,99 +219,39 @@ Before any production deployment:
 
 ---
 
-## Repository Structure
+## Active Bots
 
-**Root Directory** (Clean & Minimal):
-- `config.py` - ✅ SHARED - Global trading configuration
-- `trade_tracker.py` - ✅ SHARED - Trade tracking (used by LLM bot)
-- `requirements.txt` - ✅ SHARED - Python dependencies
+**Two autonomous trading bots** share the same LLM engine. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for complete details.
 
-**Active Bot** (ONLY ONE):
-- `llm_agent/` - ✅ LLM Trading Bot (PID: 83713)
-  - See "Current Active Bot" section below for details
+### Quick Bot Commands
 
-**Documentation**:
-- `docs/` - All project documentation
-  - `DATA_SOURCES.md` - Complete API reference
-  - `LLM_BOT_STATUS.md` - Current bot status
-  - `DYNAMIC_TOKEN_ANALYSIS.md` - Token discovery
-  - And more...
-
-**Research** (Organized by topic):
-- `research/agent-lightning/` - Agent Lightning analysis
-- `research/moon-dev/` - Moon Dev research
-- `research/funding-rates/` - Funding rate research
-- `research/strategies/` - Strategy research
-- `research/cambrian/` - Cambrian API research
-- `research/lighter/` - Lighter DEX research
-
-**Utilities**:
-- `dexes/` - DEX SDKs (Pacifica, Lighter)
-- `scripts/` - Testing and utility scripts
-- `pacifica/` - Pacifica integration modules
-
-**Archive** (ALL OLD BOTS):
-- `archive/2025-10-30/` - Complete old bot archive
-  - `live_pacifica.py.ARCHIVED` - Old Pacifica bot
-  - `old-bot-infrastructure/` - Old infrastructure
-  - `old-strategies/` - Old strategy implementations
-  - `old-bots/` - Old bot executables
-  - `old-scripts/` - Old utility scripts
-
-**⚠️ CRITICAL**: Do NOT use any files in `archive/`. All old bots have been replaced by the LLM Trading Bot.
-
----
-
-## Current Active Bot
-
-**⚠️ ONLY ONE ACTIVE BOT - LLM Trading Bot**
-
-**Bot**: `llm_agent/bot_llm.py` (PID: 7213)
-**Mode**: LIVE (real trades)
-**LLM Model**: DeepSeek Chat
-**Strategy**: AI-driven decisions with Deep42 sentiment analysis
-**Check Frequency**: Every 5 minutes (300 seconds)
-**Position Size**: $30 per trade
-**Max Positions**: 3
-**Account**: Pacifica (8saejVsbEBraGvxbJGxrosv4QKMfR2i8f59GFAnMXfMc)
-
-**Launch**:
+**Lighter Bot** (zkSync, 101+ markets, zero fees):
 ```bash
-# Live mode (real trades)
-nohup python3 -u -m llm_agent.bot_llm --live --interval 300 > logs/llm_bot.log 2>&1 &
+# Check status
+pgrep -f "lighter_agent.bot_lighter"
 
-# Dry-run mode (testing only)
-nohup python3 -u -m llm_agent.bot_llm --dry-run --interval 300 > logs/llm_bot.log 2>&1 &
+# Start/stop
+nohup python3 -u -m lighter_agent.bot_lighter --live --interval 300 > logs/lighter_bot.log 2>&1 &
+pkill -f "lighter_agent.bot_lighter"
+
+# Logs
+tail -f logs/lighter_bot.log
 ```
 
-**Stop**:
+**Pacifica Bot** (Solana, 4-5 liquid markets):
 ```bash
-pkill -f "llm_agent.bot_llm"
+# Check status
+pgrep -f "pacifica_agent.bot_pacifica"
+
+# Start/stop
+nohup python3 -u -m pacifica_agent.bot_pacifica --live --interval 300 > logs/pacifica_bot.log 2>&1 &
+pkill -f "pacifica_agent.bot_pacifica"
+
+# Logs
+tail -f logs/pacifica_bot.log
 ```
 
-**Logs**: `logs/llm_bot.log` - All bot activity and decisions
-
-**View Decision History**:
-```bash
-# Quick summary with action breakdown
-python3 scripts/view_decisions.py
-
-# Full detailed breakdown with Deep42 queries, token analyses, reasoning
-python3 scripts/view_decision_details.py
-```
-
-**Decision Viewing Tools**:
-- `scripts/view_decisions.py` - Quick summary of all decisions with stats
-- `scripts/view_decision_details.py` - Complete breakdown showing:
-  - 📊 Open positions count
-  - 🔍 Custom Deep42 query generated
-  - 🎯 Tokens selected for analysis
-  - 📈 Token analyses completed
-  - 💼 Position evaluations
-  - 🤖 Final decision (BUY/SELL/CLOSE/NOTHING)
-  - 📝 Complete reasoning
-  - 💰 API cost
-  - ⚡ Execution result
+**See [`USER_REFERENCE.md`](USER_REFERENCE.md) for complete command reference**
 
 ## Task Master AI Instructions
 **Import Task Master's development workflow commands and guidelines, treat as if import is in the main CLAUDE.md file.**

@@ -54,11 +54,25 @@
 
 ### 3. Calculated Indicators
 
-**Technical Indicators**
-- **What**: RSI (14), MACD (12,26,9), SMA (20, 50), Bollinger Bands (20, 2σ)
-- **Source**: Calculated from Pacifica OHLCV data
-- **Library**: pandas_ta
-- **Label in Prompt**: "Calculated (Indicators)"
+**Technical Indicators** (Multi-Timeframe System)
+
+**5-Minute Indicators** (for entry/exit timing):
+- **EMA** (20 period) - Exponential Moving Average
+- **MACD** (12,26,9) - Moving Average Convergence Divergence
+- **RSI** (14 period) - Relative Strength Index (oversold < 30, overbought > 70)
+- **Bollinger Bands** (20 period, 2σ) - Upper, middle, lower bands + width
+- **Stochastic Oscillator** (%K and %D, 14/3) - Momentum oscillator (oversold < 20, overbought > 80)
+
+**4-Hour Indicators** (for trend context):
+- **EMA** (20 period) - Longer-term trend direction
+- **ATR** (14 period) - Average True Range (volatility measurement)
+- **ADX** (14 period) - Average Directional Index (trend strength, > 25 = strong trend)
+
+**Source**: Calculated from DEX OHLCV data (Lighter: 5m and 4h candles, Pacifica: 15m candles)
+**Library**: `ta` (technical analysis library)
+**Implementation**: `llm_agent/data/indicator_calculator.py`
+**Usage**: Both timeframes provided to LLM for comprehensive analysis
+**Label in Prompt**: "Calculated (Indicators - 5m + 4h)"
 
 ## Prompt Attribution Summary
 

@@ -1,10 +1,13 @@
 """
-DeepSeek Model Client
-Handles API authentication, retries, and daily spend limits
+Multi-Model Client
+Supports DeepSeek (direct) and Qwen (via OpenRouter)
 
 Usage:
-    client = ModelClient(api_key="your_key")
-    response = client.query(prompt="Your trading prompt here")
+    # DeepSeek (default)
+    client = ModelClient(api_key="deepseek_key")
+
+    # Qwen via OpenRouter (Alpha Arena winner!)
+    client = ModelClient(api_key="openrouter_key", model="qwen-max")
 """
 
 import requests
@@ -15,27 +18,57 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
+# Model configurations
+MODEL_CONFIGS = {
+    # DeepSeek models (direct API)
+    "deepseek-chat": {
+        "provider": "deepseek",
+        "url": "https://api.deepseek.com/v1/chat/completions",
+        "model_id": "deepseek-chat",
+        "input_cost_per_1k": 0.00014,
+        "output_cost_per_1k": 0.00028,
+        "default_max_tokens": 500,
+    },
+    "deepseek-reasoner": {
+        "provider": "deepseek",
+        "url": "https://api.deepseek.com/v1/chat/completions",
+        "model_id": "deepseek-reasoner",
+        "input_cost_per_1k": 0.00055,
+        "output_cost_per_1k": 0.00220,
+        "default_max_tokens": 500,
+    },
+    # Qwen via OpenRouter - Alpha Arena winner!
+    "qwen-max": {
+        "provider": "openrouter",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "model_id": "qwen/qwen3-235b-a22b",
+        "input_cost_per_1k": 0.0012,   # ~$1.20/M
+        "output_cost_per_1k": 0.006,    # ~$6.00/M
+        "default_max_tokens": 1500,     # Qwen needs more tokens for thinking
+    },
+}
+
 
 class ModelClient:
-    """DeepSeek API client with authentication and retry logic"""
+    """Multi-model API client supporting DeepSeek and Qwen"""
 
     def __init__(
         self,
         api_key: str,
         model: str = "deepseek-chat",
         max_retries: int = 2,
-        daily_spend_limit: float = 10.0,  # USD
-        timeout: int = 30
+        daily_spend_limit: float = 10.0,
+        timeout: int = 60
     ):
         """
-        Initialize DeepSeek model client
+        Initialize model client
 
         Args:
-            api_key: DeepSeek API key
+            api_key: API key (DeepSeek or OpenRouter depending on model)
             model: Model name (default: deepseek-chat)
-            max_retries: Number of retries on failure (default: 2)
-            daily_spend_limit: Max USD to spend per day (default: $10)
-            timeout: Request timeout in seconds (default: 30)
+            max_retries: Number of retries on failure
+            daily_spend_limit: Max USD to spend per day
+            timeout: Request timeout in seconds
         """
         self.api_key = api_key
         self.model = model
@@ -43,15 +76,32 @@ class ModelClient:
         self.daily_spend_limit = daily_spend_limit
         self.timeout = timeout
 
-        self.url = "https://api.deepseek.com/v1/chat/completions"
+        # Validate model
+        if model not in MODEL_CONFIGS:
+            available = ", ".join(MODEL_CONFIGS.keys())
+            raise ValueError(f"Unknown model '{model}'. Available: {available}")
+
+        self.config = MODEL_CONFIGS[model]
+        self.provider = self.config["provider"]
+        self.url = self.config["url"]
 
         # Track spending
         self._daily_spend = 0.0
         self._spend_reset_time = datetime.now() + timedelta(days=1)
         self._last_request_time = None
 
-        # Rate limiting (minimal - run at full capacity)
-        self._min_request_interval = 0.5  # Minimal delay for maximum throughput
+        # Rate limiting
+        try:
+            from utils.shared_rate_limiter import SharedRateLimiter
+            self.shared_limiter = SharedRateLimiter()
+            self._use_shared_limiter = True
+            logger.info("✅ Using shared rate limiter")
+        except ImportError:
+            self.shared_limiter = None
+            self._use_shared_limiter = False
+            self._min_request_interval = 1.0
+
+        logger.info(f"✅ ModelClient initialized: {model} via {self.provider}")
 
     def _reset_daily_spend_if_needed(self):
         """Reset daily spend counter if new day"""
@@ -72,68 +122,80 @@ class ModelClient:
 
     def _rate_limit(self):
         """Enforce minimum time between requests"""
-        if self._last_request_time is not None:
-            elapsed = time.time() - self._last_request_time
-            if elapsed < self._min_request_interval:
-                time.sleep(self._min_request_interval - elapsed)
-
-        self._last_request_time = time.time()
+        if self._use_shared_limiter and self.shared_limiter:
+            self.shared_limiter.wait_if_needed(bot_name="Hibachi")
+        else:
+            if self._last_request_time is not None:
+                elapsed = time.time() - self._last_request_time
+                if elapsed < self._min_request_interval:
+                    time.sleep(self._min_request_interval - elapsed)
+            self._last_request_time = time.time()
 
     def _calculate_cost(self, usage: Dict) -> float:
-        """
-        Calculate cost from token usage
-
-        DeepSeek pricing (as of 2025-01-30):
-        - Input: $0.00014 per 1K tokens
-        - Output: $0.00028 per 1K tokens
-        """
+        """Calculate cost from token usage"""
         prompt_tokens = usage.get("prompt_tokens", 0)
         completion_tokens = usage.get("completion_tokens", 0)
 
-        input_cost = (prompt_tokens / 1000) * 0.00014
-        output_cost = (completion_tokens / 1000) * 0.00028
+        input_cost = (prompt_tokens / 1000) * self.config["input_cost_per_1k"]
+        output_cost = (completion_tokens / 1000) * self.config["output_cost_per_1k"]
 
         return input_cost + output_cost
 
     def query(
         self,
         prompt: str,
-        max_tokens: int = 100,
+        max_tokens: int = None,
         temperature: float = 0.1,
         retry_count: int = 0
     ) -> Optional[Dict]:
         """
-        Query DeepSeek API with retry logic
+        Query the model with retry logic
 
         Args:
             prompt: User prompt
-            max_tokens: Max tokens to generate (default: 100)
-            temperature: Sampling temperature (default: 0.1 for deterministic)
-            retry_count: Current retry attempt (internal use)
+            max_tokens: Max tokens to generate (uses model default if None)
+            temperature: Sampling temperature (0.1 for deterministic)
+            retry_count: Current retry attempt
 
         Returns:
             Dict with keys: content, usage, cost
             None if all retries failed
         """
-        # Estimate cost (conservative: assume full token usage)
-        estimated_cost = ((len(prompt) / 4 + max_tokens) / 1000) * 0.00028
+        # Use model default if not specified
+        if max_tokens is None:
+            max_tokens = self.config["default_max_tokens"]
+
+        # Estimate cost
+        estimated_cost = ((len(prompt) / 4 + max_tokens) / 1000) * self.config["output_cost_per_1k"]
         self._check_spend_limit(estimated_cost)
 
         # Rate limiting
         self._rate_limit()
 
-        # Prepare request
+        # Prepare headers
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
 
+        # Add OpenRouter-specific headers
+        if self.provider == "openrouter":
+            headers["HTTP-Referer"] = "https://github.com/trading-bot"
+            headers["X-Title"] = "Trading Bot"
+
+        # For Qwen models, disable thinking mode to get direct responses
+        # Qwen 3 uses extended thinking by default which returns empty content
+        actual_prompt = prompt
+        if self.provider == "openrouter" and "qwen" in self.config["model_id"].lower():
+            # Add /no_think to disable extended thinking mode
+            actual_prompt = f"/no_think\n{prompt}"
+
         payload = {
-            "model": self.model,
+            "model": self.config["model_id"],
             "messages": [
                 {
                     "role": "user",
-                    "content": prompt
+                    "content": actual_prompt
                 }
             ],
             "max_tokens": max_tokens,
@@ -141,7 +203,7 @@ class ModelClient:
         }
 
         try:
-            logger.info(f"DeepSeek API request (attempt {retry_count + 1}/{self.max_retries + 1})...")
+            logger.info(f"{self.model} API request (attempt {retry_count + 1}/{self.max_retries + 1})...")
 
             response = requests.post(
                 self.url,
@@ -153,9 +215,17 @@ class ModelClient:
             if response.status_code == 200:
                 data = response.json()
 
-                # Extract response
                 if "choices" in data and len(data["choices"]) > 0:
-                    content = data["choices"][0]["message"]["content"]
+                    # Get content - Qwen may have it in reasoning field
+                    message = data["choices"][0]["message"]
+                    content = message.get("content", "")
+
+                    # If content is empty, check for reasoning (Qwen's thinking mode)
+                    if not content and "reasoning" in message:
+                        # The actual response comes after thinking
+                        # For now, just note this in logs
+                        logger.warning("Qwen response in reasoning mode - content may be truncated")
+
                     usage = data.get("usage", {})
 
                     # Calculate actual cost
@@ -163,9 +233,9 @@ class ModelClient:
                     self._daily_spend += cost
 
                     logger.info(
-                        f"✅ DeepSeek response received "
+                        f"✅ {self.model} response received "
                         f"(tokens: {usage.get('total_tokens')}, cost: ${cost:.4f}, "
-                        f"daily: ${self._daily_spend:.4f})"
+                        f"daily total: ${self._daily_spend:.4f})"
                     )
 
                     return {
@@ -174,14 +244,12 @@ class ModelClient:
                         "cost": cost
                     }
                 else:
-                    logger.warning("DeepSeek response missing 'choices'")
+                    logger.warning(f"{self.model} response missing 'choices'")
                     return None
 
             elif response.status_code == 429:
-                # Rate limited - use exponential backoff with longer delays
-                # DeepSeek often needs 30-60 seconds to reset rate limits
-                wait_time = min(30 * (2 ** retry_count), 120)  # 30s, 60s, 120s max
-                logger.warning(f"DeepSeek rate limit (429), waiting {wait_time} seconds (exponential backoff)...")
+                wait_time = min(30 * (2 ** retry_count), 120)
+                logger.warning(f"{self.model} rate limit (429), waiting {wait_time}s...")
                 time.sleep(wait_time)
 
                 if retry_count < self.max_retries:
@@ -191,23 +259,22 @@ class ModelClient:
                     return None
 
             elif response.status_code == 402:
-                # Insufficient balance
-                logger.error("DeepSeek insufficient balance (402)")
+                logger.error(f"{self.model} insufficient balance (402)")
                 return None
 
             else:
-                logger.error(f"DeepSeek API error: HTTP {response.status_code}")
-                logger.error(f"Response: {response.text}")
+                logger.error(f"{self.model} API error: HTTP {response.status_code}")
+                logger.error(f"Response: {response.text[:500]}")
 
                 if retry_count < self.max_retries:
-                    logger.info(f"Retrying in 2 seconds...")
+                    logger.info("Retrying in 2 seconds...")
                     time.sleep(2)
                     return self.query(prompt, max_tokens, temperature, retry_count + 1)
                 else:
                     return None
 
         except requests.exceptions.Timeout:
-            logger.error(f"DeepSeek request timeout ({self.timeout}s)")
+            logger.error(f"{self.model} request timeout ({self.timeout}s)")
 
             if retry_count < self.max_retries:
                 logger.info("Retrying...")
@@ -216,7 +283,7 @@ class ModelClient:
                 return None
 
         except Exception as e:
-            logger.error(f"DeepSeek API error: {e}")
+            logger.error(f"{self.model} API error: {e}")
 
             if retry_count < self.max_retries:
                 logger.info("Retrying...")
@@ -231,6 +298,18 @@ class ModelClient:
         return self._daily_spend
 
     def get_remaining_budget(self) -> float:
-        """Get remaining budget for today in USD"""
+        """Get remaining budget for today"""
         self._reset_daily_spend_if_needed()
         return self.daily_spend_limit - self._daily_spend
+
+    @staticmethod
+    def list_models() -> Dict:
+        """List all available models with their costs"""
+        return {
+            name: {
+                "provider": cfg["provider"],
+                "input_cost": f"${cfg['input_cost_per_1k']*1000:.2f}/M tokens",
+                "output_cost": f"${cfg['output_cost_per_1k']*1000:.2f}/M tokens",
+            }
+            for name, cfg in MODEL_CONFIGS.items()
+        }

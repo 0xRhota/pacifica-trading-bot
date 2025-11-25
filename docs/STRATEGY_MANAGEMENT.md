@@ -4,23 +4,37 @@ Simple, elegant workflow for creating, testing, and switching trading strategies
 
 ---
 
+## Current Strategies
+
+### Unified Architecture Strategies
+
+**Location**: `strategies/` directory
+
+| Strategy | File | Type | Used By | Status |
+|----------|------|------|---------|--------|
+| **High Volume Scalping** | `high_volume_scalping_strategy.py` | Rule-based | Pacifica Bot | ✅ Active |
+| **LLM Strategy** | `llm_strategy.py` | LLM-based (DeepSeek) | Lighter Bot | ✅ Active |
+
+**Key Features**:
+- **Base Strategy Interface**: All strategies inherit from `BaseStrategy` (`strategies/base_strategy.py`)
+- **Plug-and-Play**: Easy to swap strategies without code changes
+- **Multi-Timeframe Support**: LLM strategy uses 5m + 4h indicators for comprehensive analysis
+
 ## Quick Reference
 
 ```bash
 # List available strategies
 ls strategies/*.py
 
-# Test new strategy
-python3 -c "from pacifica.strategies.your_strategy import YourStrategy; s = YourStrategy(); print('✅ Strategy loads')"
-
-# Switch strategy (edit config.py)
-PACIFICA_STRATEGY = "long_short"  # or "vwap", "basic_long_only"
-LIGHTER_STRATEGY = "vwap"         # or "long_short", "basic_long_only"
+# Current bot strategies (configured in bot files, not config.py)
+# Pacifica: HighVolumeScalpingStrategy (bots/pacifica_bot.py)
+# Lighter: LLMStrategy (bots/lighter_bot.py)
 
 # Restart bots
-pkill -f pacifica && pkill -f lighter
-python3 bots/live_pacifica.py &
-python3 bots/vwap_lighter_bot.py &
+pkill -f "bots/pacifica_bot.py"
+pkill -f "bots/lighter_bot.py"
+python3 bots/pacifica_bot.py > logs/pacifica_live.log 2>&1 &
+python3 bots/lighter_bot.py > logs/lighter_live.log 2>&1 &
 ```
 
 ---
@@ -263,10 +277,36 @@ Before going live:
 
 ---
 
+## Next Strategy Enhancements (Planned)
+
+### Enable Deep42 Macro Context for Narrative Awareness
+**Status**: 🚧 Planned for Lighter Bot
+**Current Limitation**: V2 prompt has Deep42 disabled for pure 5-min scalping focus
+
+**Objective**: Add narrative/sentiment awareness to complement technical indicators
+
+**Implementation**:
+- Enable Deep42 macro context in prompt (currently disabled)
+- Add sector performance tracking (e.g., privacy tokens moving together)
+- Cross-reference social sentiment with technical signals
+- Potential to catch moves like ZEC privacy token pump with fundamental backing
+
+**Expected Improvement**:
+- Better "knowing" vs "lucky" trade ratio
+- Catch narrative-driven pumps earlier
+- Avoid fading strong fundamental trends
+
+**Trade-offs**:
+- Adds ~300-500 tokens per cycle (minimal cost impact)
+- May reduce pure scalping speed (need to balance 5-min vs 4h context)
+
+---
+
 ## Quick Strategy Comparison
 
 | Strategy | Win Rate | R:R | Check Freq | Best For |
 |----------|----------|-----|------------|----------|
+| V2 LLM Deep Reasoning | ~60% | 2-3:1 | 5 min | Technical momentum + strong trends |
 | VWAP Mean Reversion | 55-65% | 3:1 | 5 min | Ranging markets, zero fees |
 | Orderbook Imbalance | 45-55% | 2:1 | 15 min | Trending markets |
 | Basic Long Only | 30-40% | 1:2 | 15 min | Bull markets |

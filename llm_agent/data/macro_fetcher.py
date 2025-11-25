@@ -20,18 +20,28 @@ logger = logging.getLogger(__name__)
 class MacroContextFetcher:
     """Fetch and cache macro market context for LLM trading agent"""
 
-    def __init__(self, cambrian_api_key: str, refresh_interval_hours: int = 12):
+    def __init__(self, cambrian_api_key: str, refresh_interval_hours: int = 6):
         """
         Args:
             cambrian_api_key: Cambrian API key for Deep42
-            refresh_interval_hours: How often to refresh macro context (default: 12 hours)
+            refresh_interval_hours: How often to refresh macro context (default: 6 hours)
         """
         self.cambrian_api_key = cambrian_api_key
         self.refresh_interval = timedelta(hours=refresh_interval_hours)
 
-        # Cache
+        # Cache for macro context (6h)
         self._cached_context: Optional[str] = None
         self._last_fetch: Optional[datetime] = None
+
+        # Cache for regime context (1h)
+        self._cached_regime: Optional[str] = None
+        self._regime_last_fetch: Optional[datetime] = None
+        self._regime_interval = timedelta(hours=1)
+
+        # Cache for BTC health context (4h)
+        self._cached_btc: Optional[str] = None
+        self._btc_last_fetch: Optional[datetime] = None
+        self._btc_interval = timedelta(hours=4)
 
     def _should_refresh(self) -> bool:
         """Check if cache should be refreshed"""
@@ -230,6 +240,11 @@ class MacroContextFetcher:
         self._last_fetch = datetime.now()
 
         logger.info("✅ Macro context refreshed")
+        logger.info("=" * 80)
+        logger.info("REFRESHED MACRO CONTEXT (will be used for next 6 hours):")
+        logger.info("=" * 80)
+        logger.info(macro_context)
+        logger.info("=" * 80)
         return macro_context
 
     def get_cache_age(self) -> Optional[timedelta]:
@@ -237,3 +252,119 @@ class MacroContextFetcher:
         if self._last_fetch is None:
             return None
         return datetime.now() - self._last_fetch
+
+    def _should_refresh_regime(self) -> bool:
+        """Check if regime cache should be refreshed"""
+        if self._cached_regime is None or self._regime_last_fetch is None:
+            return True
+
+        time_since_fetch = datetime.now() - self._regime_last_fetch
+        return time_since_fetch >= self._regime_interval
+
+    def _should_refresh_btc(self) -> bool:
+        """Check if BTC health cache should be refreshed"""
+        if self._cached_btc is None or self._btc_last_fetch is None:
+            return True
+
+        time_since_fetch = datetime.now() - self._btc_last_fetch
+        return time_since_fetch >= self._btc_interval
+
+    def get_regime_context(self, force_refresh: bool = False) -> str:
+        """
+        Get market regime context (risk-on vs risk-off) with 1-hour caching
+
+        Args:
+            force_refresh: Force refresh even if cache is valid
+
+        Returns:
+            Formatted regime context string for LLM prompt
+        """
+        # Check if refresh needed
+        if not force_refresh and not self._should_refresh_regime():
+            age = datetime.now() - self._regime_last_fetch
+            logger.info(f"Using cached regime context (age: {age})")
+            return self._cached_regime
+
+        # Fetch fresh data
+        logger.info("Fetching fresh regime context from Deep42...")
+
+        question = "Is the crypto market currently in risk-on or risk-off mode? What should traders focus on right now?"
+        regime_answer = self._fetch_deep42_analysis(question)
+
+        if not regime_answer:
+            # Fallback to cached data if available
+            if self._cached_regime:
+                logger.warning("Deep42 regime fetch failed, using cached data")
+                return self._cached_regime
+            return "⚠️ Deep42 regime analysis unavailable"
+
+        # Format context
+        regime_context = f"""Market Regime Analysis:
+{regime_answer}
+"""
+
+        # Update cache
+        self._cached_regime = regime_context
+        self._regime_last_fetch = datetime.now()
+
+        logger.info("✅ Regime context refreshed (1h cache)")
+        return regime_context
+
+    def get_btc_health(self, force_refresh: bool = False) -> str:
+        """
+        Get BTC health indicator with 4-hour caching
+
+        Args:
+            force_refresh: Force refresh even if cache is valid
+
+        Returns:
+            Formatted BTC health string for LLM prompt
+        """
+        # Check if refresh needed
+        if not force_refresh and not self._should_refresh_btc():
+            age = datetime.now() - self._btc_last_fetch
+            logger.info(f"Using cached BTC health context (age: {age})")
+            return self._cached_btc
+
+        # Fetch fresh data
+        logger.info("Fetching fresh BTC health from Deep42...")
+
+        question = "Should I be long or short Bitcoin right now based on price action, sentiment, and on-chain data?"
+        btc_answer = self._fetch_deep42_analysis(question)
+
+        if not btc_answer:
+            # Fallback to cached data if available
+            if self._cached_btc:
+                logger.warning("Deep42 BTC health fetch failed, using cached data")
+                return self._cached_btc
+            return "⚠️ Deep42 BTC health analysis unavailable"
+
+        # Format context
+        btc_context = f"""BTC Health Indicator:
+{btc_answer}
+"""
+
+        # Update cache
+        self._cached_btc = btc_context
+        self._btc_last_fetch = datetime.now()
+
+        logger.info("✅ BTC health refreshed (4h cache)")
+        return btc_context
+
+    def get_enhanced_context(self, force_refresh: bool = False) -> Dict[str, str]:
+        """
+        Get all three Deep42 contexts (macro, regime, BTC health)
+
+        Args:
+            force_refresh: Force refresh all contexts even if caches are valid
+
+        Returns:
+            Dict with keys: 'macro', 'regime', 'btc_health'
+        """
+        logger.info("Fetching enhanced Deep42 context (multi-timeframe)...")
+
+        return {
+            "macro": self.get_macro_context(force_refresh),
+            "regime": self.get_regime_context(force_refresh),
+            "btc_health": self.get_btc_health(force_refresh)
+        }

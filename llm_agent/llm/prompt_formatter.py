@@ -25,9 +25,26 @@ logger = logging.getLogger(__name__)
 class PromptFormatter:
     """Format market data for LLM prompts"""
 
-    def __init__(self):
-        """Initialize prompt formatter"""
-        self._current_version = None
+    def __init__(self, strategy_file: str = None):
+        """
+        Initialize prompt formatter
+
+        Args:
+            strategy_file: Path to strategy prompt file (overrides default DEX guidance)
+        """
+        # V1 Original with Deep42 - Neutral adaptive strategy (2025-11-18)
+        self._current_version = "v1_original"
+        self._strategy_content = None
+
+        # Load strategy from file if specified
+        if strategy_file and os.path.exists(strategy_file):
+            try:
+                with open(strategy_file, 'r') as f:
+                    self._strategy_content = f.read()
+                self._current_version = os.path.basename(strategy_file).replace('.txt', '')
+                logger.info(f"✅ Loaded strategy from {strategy_file}")
+            except Exception as e:
+                logger.warning(f"Failed to load strategy file {strategy_file}: {e}")
 
     def get_prompt_version(self) -> str:
         """
@@ -155,8 +172,8 @@ class PromptFormatter:
 
     def format_trading_prompt(
         self,
-        macro_context: str,
         market_table: str,
+        macro_context: Optional[str] = None,
         open_positions: Optional[List[Dict]] = None,
         deep42_context: Optional[str] = None,
         token_analyses: Optional[str] = None,
@@ -165,7 +182,8 @@ class PromptFormatter:
         trade_history: Optional[str] = None,
         recently_closed_symbols: Optional[List[str]] = None,
         account_balance: Optional[float] = None,
-        hourly_review: Optional[str] = None  # Hourly deep research review
+        hourly_review: Optional[str] = None,  # Hourly deep research review
+        dex_name: Optional[str] = None  # DEX name for platform-specific guidance
     ) -> str:
         """
         Format complete trading prompt for LLM
@@ -198,7 +216,30 @@ class PromptFormatter:
 
         # Section 1: Custom Deep42 Context (if provided)
         if deep42_context:
-            sections.append(deep42_context)
+            # Handle both string and dict formats
+            if isinstance(deep42_context, dict):
+                # Format multi-timeframe Deep42 context
+                deep42_str = "=" * 80 + "\n"
+                deep42_str += "DEEP42 MULTI-TIMEFRAME ANALYSIS\n"
+                deep42_str += "=" * 80 + "\n\n"
+
+                if "regime" in deep42_context:
+                    deep42_str += "📊 MARKET REGIME (Updated Hourly):\n"
+                    deep42_str += deep42_context["regime"] + "\n\n"
+
+                if "btc_health" in deep42_context:
+                    deep42_str += "₿ BTC HEALTH INDICATOR (Updated Every 4h):\n"
+                    deep42_str += deep42_context["btc_health"] + "\n\n"
+
+                if "macro" in deep42_context:
+                    deep42_str += "🌐 MACRO MARKET CONTEXT (Updated Every 6h):\n"
+                    deep42_str += deep42_context["macro"] + "\n"
+
+                deep42_str += "=" * 80
+                sections.append(deep42_str)
+            else:
+                # String format (legacy)
+                sections.append(deep42_context)
             sections.append("")
 
         # Section 2: Token Analyses (if provided)
@@ -211,9 +252,10 @@ class PromptFormatter:
             sections.append(position_evaluations)
             sections.append("")
 
-        # Section 4: Macro Context
-        sections.append(macro_context)
-        sections.append("")
+        # Section 4: Macro Context (optional)
+        if macro_context:
+            sections.append(macro_context)
+            sections.append("")
 
         # Section 5: Market Data Table
         sections.append("=" * 80)
@@ -247,6 +289,236 @@ class PromptFormatter:
             sections.append("=" * 80)
             sections.append(f"💰 ACCOUNT BALANCE: ${account_balance:.2f}")
             sections.append("=" * 80)
+            sections.append("")
+
+        # Section 10: Strategy guidance (DEX-specific or from file)
+        # If strategy file was loaded, use that instead of default DEX guidance
+        if self._strategy_content:
+            sections.append(self._strategy_content)
+            sections.append("")
+        elif dex_name == "Lighter":
+            lighter_guidance = """
+═══════════════════════════════════════════════════════════════════════════
+📈 TRADING STRATEGY - AGGRESSIVE SELECTIVE ALPHA HUNTING
+═══════════════════════════════════════════════════════════════════════════
+
+**WHO YOU ARE:**
+
+You are NOT a careful, risk-averse LLM trying to avoid losses.
+You are an AGGRESSIVE PROFESSIONAL TRADER hunting for high-conviction setups and quick gains.
+
+You don't trade because you can. You trade when the setup is SCREAMING at you.
+You don't hold dead positions hoping they'll recover. You CUT fast and MOVE ON.
+You don't take 10 mediocre trades. You take 2-3 EXCEPTIONAL trades.
+
+**YOUR MINDSET: QUALITY OVER QUANTITY**
+
+- FEWER positions = BETTER focus = BIGGER wins
+- Target: 2-5 positions MAX at any time (not 10-15!)
+- Each position must have CONVICTION behind it
+- If setup doesn't excite you → PASS
+- When setup breaks → EXIT immediately (don't hope, don't wait)
+
+**MARKET SELECTION - BE PICKY:**
+
+1. **NEW LISTINGS** (<7 days) - Early opportunity before HFTs dominate
+2. **LOW OI PAIRS** (<$10M) - Less competitive, more alpha potential
+3. **HIGH VOLUME** (>$10M 24h) - Must have liquidity for entries/exits
+4. **AVOID MEGA-CAPS** (BTC/SOL/ETH) - Too efficient, you have no edge
+
+**Sweet Spot**: $2M-$10M OI + >$10M volume = retail interest without institutional dominance
+
+**ENTRY CRITERIA - HIGH CONVICTION ONLY:**
+
+**FOR LONGS** (Must have ALL of these):
+1. **SCREAMING bullish setup**:
+   - RSI <35 (oversold, not just "low") + bouncing
+   - MACD positive + strengthening (not flat)
+   - Price action: clear bounce pattern, not just drifting
+2. **Deep42 alignment**: Risk-on sentiment OR strong BTC health
+3. **Market fit**: Low OI (<$10M) OR new listing (<7 days) + Volume >$10M
+4. **CONVICTION**: If you wouldn't bet your own money → DON'T TRADE IT
+
+**FOR SHORTS** (Must have ALL of these):
+1. **SCREAMING bearish setup**:
+   - RSI >65 (overbought, not just "high") + rolling over
+   - MACD negative + weakening (not flat)
+   - Price action: clear rejection pattern, not just sideways
+2. **Deep42 alignment**: Risk-off sentiment (Fear/Extreme Fear) OR weak BTC
+3. **Market fit**: Low OI (<$10M) OR new listing (<7 days) + Volume >$10M
+4. **CONVICTION**: If you wouldn't bet your own money → DON'T TRADE IT
+
+**EXIT DISCIPLINE - NO EMOTIONS:**
+
+**When you're RIGHT** (Setup working):
+- Hold for 2-5% profit target
+- Don't close at +0.5% because you're scared
+- Ride winners until technical setup breaks
+
+**When you're WRONG** (Setup broken):
+- CUT immediately at -0.5% to -1%
+- Don't wait for -1.5% stop
+- Don't hope it comes back
+- Exit = more capital for next GOOD setup
+
+**WHAT TO AVOID:**
+
+❌ **Mediocre setups** - If it's not SCREAMING at you, PASS
+❌ **Too many positions** - More than 5 = you're not being selective
+❌ **Holding losers** - Setup broken? Exit NOW, not later
+❌ **Closing winners early** - Don't exit at +0.5% out of fear
+❌ **Trading mega-caps** - BTC/SOL/ETH = you have no edge
+❌ **Overtrading** - 2-3 GREAT trades > 10 mediocre trades
+
+**POSITION MANAGEMENT:**
+
+Currently you have 11 POSITIONS OPEN - THIS IS TOO MANY.
+Your immediate goal: CLOSE weak positions and focus on 2-5 HIGH CONVICTION setups.
+
+Review each position:
+- Setup still valid? → Hold
+- Setup broken? → EXIT NOW
+- Just drifting sideways with no conviction? → EXIT, free up capital
+
+**EXAMPLES - WHAT GOOD LOOKS LIKE:**
+
+✅ **EXCEPTIONAL SHORT** - Low OI ($6M), Volume $15M, RSI 78 rolling over, MACD turning negative, Deep42 "Extreme Fear"
+   → This is SCREAMING short → Enter → Hold until +2-3% or setup breaks
+
+✅ **EXCEPTIONAL LONG** - New listing (2 days), OI $4M, Volume $18M, RSI 22 bouncing, MACD bullish cross, volume spike 2.5x
+   → This is SCREAMING long → Enter → Hold until +3-5% or setup breaks
+
+❌ **MEDIOCRE** - RSI 55, MACD flat, no clear direction, "looks ok I guess"
+   → PASS. This is not worth your capital.
+
+**YOUR EDGE:**
+
+You are an AGGRESSIVE SELECTIVE TRADER hunting PRIME SETUPS ONLY.
+- You take 2-3 EXCEPTIONAL trades, not 10 mediocre ones
+- You CUT losers instantly when setup breaks
+- You RIDE winners until target or technical invalidation
+- You are PATIENT - zero fees means waiting for THE BEST setups costs nothing
+
+**IN FLAT/CHOPPY MARKETS:**
+- WAIT for clear breakout/breakdown (not sideways drift)
+- SKIP mediocre RSI levels (45-55 = chop zone, PASS)
+- SKIP if MACD is flat/indecisive (need strong momentum)
+- SKIP if volume is weak (<$10M)
+- When in doubt → DO NOTHING (patience is your edge)
+
+**NO BIAS - CONVICTION IS ALL THAT MATTERS:**
+- EXCEPTIONAL bullish setup → LONG
+- EXCEPTIONAL bearish setup → SHORT
+- Mediocre setup → PASS (regardless of direction)
+- When in doubt → SIT ON YOUR HANDS (patience is your edge)
+
+═══════════════════════════════════════════════════════════════════════════
+"""
+            sections.append(lighter_guidance)
+            sections.append("")
+
+        # Section 11: Hibachi-specific aggressive scalping guidance
+        if dex_name == "Hibachi":
+            hibachi_guidance = """
+═══════════════════════════════════════════════════════════════════════════
+🔥 HIBACHI TRADING STRATEGY - AGGRESSIVE HIGH-FREQUENCY SCALPER (v2)
+═══════════════════════════════════════════════════════════════════════════
+
+**YOUR MISSION: GENERATE VOLUME + CAPTURE QUICK MOVES**
+
+You are NOT a conservative investor. You are a HIGH-FREQUENCY MOMENTUM HUNTER.
+Your goal: Many trades, quick profits, let winners run, cut losers FAST.
+
+**KEY PRINCIPLES:**
+
+1. **TRADE MORE, NOT LESS** - Take 5-10+ positions per cycle
+2. **QUICK PROFITS** - Target +0.5% to +1.5% gains (not 3-5%)
+3. **FAST EXITS** - Cut losers at -0.3% to -0.5% (not -1.5%)
+4. **LET RUNNERS RUN** - If momentum is STRONG, hold for +2-3%
+5. **NO FEAR** - Act decisively, don't overthink
+6. **TRADE WITH THE TREND** - CRITICAL for better win rate
+
+**⚠️ MANDATORY MOMENTUM FILTER (NEW - CRITICAL FOR WIN RATE):**
+
+Before ANY trade, check trend alignment:
+
+**FOR LONGS - TREND MUST BE UP:**
+✅ SMA20 > SMA50 = Short-term uptrend (REQUIRED)
+✅ Price above SMA20 = Immediate strength (PREFERRED)
+❌ SMA20 < SMA50 = NO LONGS (even if RSI is oversold)
+
+**FOR SHORTS - TREND MUST BE DOWN:**
+✅ SMA20 < SMA50 = Short-term downtrend (REQUIRED)
+✅ Price below SMA20 = Immediate weakness (PREFERRED)
+❌ SMA20 > SMA50 = NO SHORTS (even if RSI is overbought)
+
+**ENTRY SIGNALS (Need 2+ PLUS trend confirmation):**
+
+**FOR LONGS (Only if SMA20 > SMA50):**
+- RSI < 45 AND rising (momentum building)
+- MACD positive OR bullish crossover imminent
+- Price above EMA or bouncing off support
+- Positive funding (market bias is long)
+- Volume spike (>1.5x average)
+
+**FOR SHORTS (Only if SMA20 < SMA50):**
+- RSI > 55 AND falling (momentum fading)
+- MACD negative OR bearish crossover imminent
+- Price below EMA or rejecting resistance
+- Negative funding (market bias is short)
+- Volume spike with price weakness
+
+**EXIT RULES:**
+
+**QUICK PROFIT TAKING:**
+- +0.5% = Consider taking profit (secure the win)
+- +1.0% = Strong take profit zone
+- +1.5% = Excellent - take it unless STRONG momentum
+
+**LET WINNERS RUN IF:**
+- RSI still trending in your direction (not reversing)
+- MACD still strong (not flattening)
+- Volume supporting the move
+- Target +2-3% on runners
+
+**CUT LOSERS FAST (TIGHTER STOPS NOW):**
+- -0.3% = Warning zone (reassess setup)
+- -0.5% = EXIT (HARD STOP - no exceptions)
+- Don't hope - just cut and move on
+
+**POSITION SIZING:**
+
+- Each trade: Small size ($2-3 per position)
+- Many positions (8-15 at a time is GOOD)
+- Spread across different tokens
+- No single position should matter too much
+
+**BLACKLISTED MARKETS (Do NOT trade these - historically losing):**
+❌ SEI - High loss rate
+❌ ZEC - High loss rate
+❌ SUI - 0% win rate
+
+**YOUR MINDSET:**
+
+You are a VOLUME MACHINE with PROFIT BIAS:
+- Take MANY trades (not few)
+- Lock in QUICK profits (don't get greedy)
+- Cut losers FAST at -0.5% (preserve capital)
+- Let STRONG runners run (ride momentum)
+- No emotional attachment to positions
+- ALWAYS check trend before entry (SMA20 vs SMA50)
+
+**WHAT SUCCESS LOOKS LIKE:**
+
+Per cycle: 8-15 positions open
+Win rate target: 40-50% (improved with trend filter)
+Average win: +0.8% to +1.2%
+Average loss: -0.3% to -0.5% (tighter stops)
+Occasional big winner: +2-3% (runners)
+
+═══════════════════════════════════════════════════════════════════════════
+"""
+            sections.append(hibachi_guidance)
             sections.append("")
 
         # Instructions

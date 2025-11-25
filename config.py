@@ -147,6 +147,39 @@ class GlobalConfig:
     EMERGENCY_STOP_FILE = ".emergency_stop"  # Touch this file to halt all bots
 
 
+class PositionSizingConfig:
+    """Dynamic Position Sizing Configuration - Applied across all bots"""
+
+    # Enable/disable dynamic sizing (fallback to hardcoded if False)
+    USE_DYNAMIC_SIZING = True
+
+    # Approach: "equal_weight" or "percentage_based"
+    # equal_weight: Divides available capital by max_positions, applies confidence multiplier
+    # percentage_based: Uses fixed % of account per trade, applies confidence multiplier
+    APPROACH = "equal_weight"  # Based on simulation results at $150 account
+
+    # Reserve percentage (capital held back for safety)
+    RESERVE_PCT = 0.15  # 15% reserve
+
+    # Confidence multipliers (applied to base position size)
+    CONFIDENCE_MULTIPLIERS = {
+        "very_low": (0.0, 0.5, 0.7),   # conf < 0.5 = 0.7x
+        "low": (0.5, 0.7, 1.0),        # 0.5 <= conf < 0.7 = 1.0x
+        "medium": (0.7, 0.9, 1.3),     # 0.7 <= conf < 0.9 = 1.3x
+        "high": (0.9, 1.0, 1.6),       # conf >= 0.9 = 1.6x
+    }
+
+    # Percentage-based approach settings (only used if APPROACH = "percentage_based")
+    TARGET_PCT_PER_POSITION = 0.15  # 15% of account per trade
+    MAX_EXPOSURE_PCT = 0.85         # Max 85% of account deployed
+
+    # Smart skipping (percentage-based only)
+    # Skip trades where confidence is low but allocation would be high
+    SKIP_LOW_CONFIDENCE_HIGH_ALLOCATION = True
+    SKIP_CONFIDENCE_THRESHOLD = 0.65      # Below this = "low confidence"
+    SKIP_ALLOCATION_THRESHOLD = 0.20      # Above this = "high allocation"
+
+
 # Validation on import
 def validate_config():
     """Validate configuration on import"""
