@@ -50,8 +50,12 @@ def main():
     """Main bot loop with macro context integration"""
 
     # Initialize macro context fetcher (refreshes every 12 hours)
+    cambrian_key = os.getenv("CAMBRIAN_API_KEY")
+    if not cambrian_key:
+        raise ValueError("CAMBRIAN_API_KEY environment variable not set")
+
     macro_fetcher = MacroContextFetcher(
-        cambrian_api_key="doug.ZbEScx8M4zlf7kDn",
+        cambrian_api_key=cambrian_key,
         refresh_interval_hours=12
     )
 

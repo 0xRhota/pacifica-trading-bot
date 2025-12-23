@@ -16,6 +16,7 @@ from datetime import datetime
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from trade_tracker import TradeTracker
+from utils.cambrian_risk_engine import CambrianRiskEngine, RiskAssessment
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ class HibachiTradeExecutor:
         hibachi_sdk: HibachiSDK instance for order placement
         trade_tracker: TradeTracker instance for logging
         dry_run: If True, don't actually place orders (default: False)
-        default_position_size: Default position size in USD (default: $2 for $58 account)
+        default_position_size: Default position size in USD (default: $10 to offset fees)
         max_positions: Max open positions (default: 10)
     """
 
@@ -37,16 +38,32 @@ class HibachiTradeExecutor:
         hibachi_sdk,  # HibachiSDK instance
         trade_tracker: TradeTracker,
         dry_run: bool = False,
-        default_position_size: float = 5.0,  # $5 per trade (~8% of $58 account)
-        max_positions: int = 10,
-        max_position_age_minutes: int = 240  # 4 hours (same as Lighter)
+        default_position_size: float = 10.0,  # $10 per trade - larger to offset fees
+        max_positions: int = 5,  # Reduced from 10 to force selectivity
+        min_confidence: float = 0.7,  # v7: Raised from 0.6 (Qwen recommendation)
+        max_position_age_minutes: int = 240,  # 4 hours (same as Lighter)
+        cambrian_api_key: str = None  # For risk engine
     ):
         self.sdk = hibachi_sdk
         self.tracker = trade_tracker
         self.dry_run = dry_run
         self.default_position_size = default_position_size
         self.max_positions = max_positions
+        self.min_confidence = min_confidence
         self.max_position_age_minutes = max_position_age_minutes
+
+        # Hibachi fee rate (taker fee ~0.035% per trade)
+        # Round-trip = entry + exit = ~0.07% total
+        self.fee_rate = 0.00035  # 0.035% per transaction
+
+        # Initialize Cambrian Risk Engine
+        self.risk_engine = None
+        if cambrian_api_key:
+            try:
+                self.risk_engine = CambrianRiskEngine(cambrian_api_key)
+                logger.info("✅ Cambrian Risk Engine enabled")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not initialize risk engine: {e}")
 
         mode = "DRY-RUN" if dry_run else "LIVE"
         logger.info(f"✅ HibachiTradeExecutor initialized ({mode} mode, ${default_position_size}/trade, Max Age: {max_position_age_minutes}min)")
@@ -94,6 +111,12 @@ class HibachiTradeExecutor:
                 if tracker_position:
                     open_time = tracker_position.get('timestamp')
                     if open_time:
+                        # Handle both datetime and string timestamps
+                        if isinstance(open_time, str):
+                            try:
+                                open_time = datetime.fromisoformat(open_time)
+                            except ValueError:
+                                continue
                         age_minutes = (datetime.now() - open_time).total_seconds() / 60
 
                         if age_minutes > self.max_position_age_minutes:
@@ -122,6 +145,22 @@ class HibachiTradeExecutor:
         reasoning = decision.get('reasoning', 'No reason provided')
 
         logger.info(f"🎯 Executing decision: {action} {symbol} - {reasoning}")
+
+        # ═══════════════════════════════════════════════════════════════
+        # FEE FILTER - Reject low-confidence trades (v2 fee optimization)
+        # Round-trip fees = 0.09% → need >0.09% edge to break even
+        # Low confidence setups won't overcome fee drag
+        # ═══════════════════════════════════════════════════════════════
+        confidence = decision.get('confidence', 0.5)
+        if action in ['LONG', 'SHORT'] and confidence < self.min_confidence:
+            logger.info(f"💸 [FEE-FILTER] Skipping {action} {symbol} - confidence {confidence:.2f} < {self.min_confidence} (fees would eat edge)")
+            return {
+                'success': False,
+                'action': action,
+                'symbol': symbol,
+                'error': f'Confidence {confidence:.2f} below min {self.min_confidence} - fee filter',
+                'filtered_by': 'fee_filter'
+            }
 
         # Fetch current positions
         positions = await self._fetch_open_positions()
@@ -184,34 +223,47 @@ class HibachiTradeExecutor:
                     'error': 'Cannot get price'
                 }
 
-            # DYNAMIC POSITION SIZING (mirrors Lighter bot approach)
-            # Scale position size based on account balance and confidence
+            # DYNAMIC LEVERAGE SYSTEM (v6 - Aggressive sizing 2025-12-05)
+            # Key insight: Perps allow notional > account balance
+            # Higher confidence = higher leverage = MUCH bigger bets on strong setups
+            # Extended bot uses $500-600 positions - we should too
             confidence = decision.get('confidence', 0.5) if decision else 0.5
             account_balance = await self._fetch_account_balance()
 
+            # Aggressive leverage tiers (v6 - based on Lighter analysis)
+            # Note: 0.8+ confidence underperforms on Lighter - cap leverage there
+            # | Confidence | Leverage | Base% | Example ($70 acct) |
+            # |------------|----------|-------|-------------------|
+            # | <0.6       | REJECT   | -     | Filtered          |
+            # | 0.6-0.7    | 4x       | 50%   | $140 notional     |
+            # | 0.7-0.8    | 6x       | 60%   | $252 notional     |
+            # | 0.8-0.9    | 5x       | 50%   | $175 notional     | ← Reduced! Overconf trap
+            # | 0.9+       | 4x       | 40%   | $112 notional     | ← Most reduced!
+
             if account_balance and account_balance > 1.0:
-                # Reserve 15% of account for safety
-                reserve_pct = 0.15
-                available_capital = account_balance * (1 - reserve_pct)
-
-                # Confidence-based position sizing (% of available capital)
-                # Aggressive scalping: use more capital per trade
-                if confidence < 0.5:
-                    position_pct = 0.08   # 8% of available
-                elif confidence < 0.7:
-                    position_pct = 0.12  # 12% of available
-                elif confidence < 0.85:
-                    position_pct = 0.15  # 15% of available
+                # Confidence-based leverage scaling (min confidence 0.6 enforced by fee filter)
+                # NOTE: Based on Lighter data, 0.8+ confidence UNDERPERFORMS
+                # We scale DOWN leverage for highest confidence (overconfidence trap)
+                if confidence < 0.7:
+                    leverage = 4.0   # Decent setup - solid bet
+                    base_pct = 0.50  # 50% of account
+                elif confidence < 0.8:
+                    leverage = 6.0   # Sweet spot! Best WR on Lighter
+                    base_pct = 0.60  # 60% of account - max aggression
+                elif confidence < 0.9:
+                    leverage = 5.0   # High conf but risky - dial back
+                    base_pct = 0.50  # 50% - more cautious
                 else:
-                    position_pct = 0.20  # 20% of available (high confidence)
+                    leverage = 4.0   # Very high conf = overconfidence trap
+                    base_pct = 0.40  # 40% - be careful here
 
-                # Calculate position size
-                calculated_size = available_capital * position_pct
+                position_size_usd = account_balance * base_pct * leverage
 
-                # Minimum $3, maximum 25% of account per position
-                min_size = 3.0
-                max_size = account_balance * 0.25
-                position_size_usd = max(min_size, min(calculated_size, max_size))
+                # Minimum $100 notional, maximum $1000 notional per position
+                # (Risk engine will block if liquidation risk too high)
+                min_size = 100.0
+                max_size = 1000.0
+                position_size_usd = max(min_size, min(position_size_usd, max_size))
 
                 # Check remaining capacity (don't overextend)
                 positions = await self._fetch_open_positions()
@@ -221,17 +273,71 @@ class HibachiTradeExecutor:
                     logger.warning(f"⚠️ Max positions ({self.max_positions}) reached")
 
                 logger.info(
-                    f"💰 Dynamic sizing: ${account_balance:.2f} balance | "
-                    f"conf={confidence:.2f} → {position_pct*100:.0f}% = ${position_size_usd:.2f} "
-                    f"({position_size_usd/account_balance*100:.1f}% of account)"
+                    f"🚀 Leveraged sizing: ${account_balance:.2f} balance × {leverage:.1f}x | "
+                    f"conf={confidence:.2f} → ${position_size_usd:.2f} notional "
+                    f"(margin ~${position_size_usd/leverage:.2f})"
                 )
             else:
-                # Fallback to default if can't fetch balance
-                position_size_usd = self.default_position_size
+                # Fallback to minimum leveraged size
+                position_size_usd = 50.0  # Minimum $50 notional
+                leverage = 2.0  # Default leverage for fallback
                 if account_balance is None:
-                    logger.warning("Could not fetch balance - using default position sizing")
+                    logger.warning("Could not fetch balance - using minimum leveraged size ($50)")
                 else:
-                    logger.warning(f"Balance too small (${account_balance:.2f}) - using default sizing")
+                    logger.warning(f"Balance too small (${account_balance:.2f}) - using minimum leveraged size ($50)")
+
+            # ═══════════════════════════════════════════════════════════════
+            # CAMBRIAN RISK ENGINE CHECK
+            # Monte Carlo simulation to assess liquidation probability
+            # ═══════════════════════════════════════════════════════════════
+            risk_assessment = None
+            if self.risk_engine:
+                try:
+                    direction = "long" if action == "LONG" else "short"
+                    risk_assessment = self.risk_engine.assess_risk(
+                        symbol=symbol,
+                        entry_price=price,
+                        leverage=leverage,
+                        direction=direction,
+                        risk_horizon="1d"  # 1 day horizon for scalping
+                    )
+
+                    if risk_assessment:
+                        # Log detailed assessment
+                        self.risk_engine.log_assessment(risk_assessment)
+
+                        # Check if trade should be blocked
+                        should_block, block_reason = self.risk_engine.should_block_trade(risk_assessment)
+
+                        if should_block:
+                            logger.warning(f"🚨 TRADE BLOCKED BY RISK ENGINE: {block_reason}")
+                            logger.warning(f"   {risk_assessment.to_log_string()}")
+                            return {
+                                'success': False,
+                                'action': action,
+                                'symbol': symbol,
+                                'error': f'Risk too high: {block_reason}',
+                                'risk_assessment': {
+                                    'risk_pct': risk_assessment.risk_probability * 100,
+                                    'liq_price': risk_assessment.liquidation_price,
+                                    'sigmas_away': risk_assessment.sigmas_away
+                                }
+                            }
+
+                        # Apply position size multiplier based on risk
+                        risk_multiplier = self.risk_engine.get_position_size_multiplier(risk_assessment)
+                        if risk_multiplier < 1.0:
+                            original_size = position_size_usd
+                            position_size_usd *= risk_multiplier
+                            logger.info(
+                                f"⚠️ Risk-adjusted size: ${original_size:.2f} × {risk_multiplier:.2f} = ${position_size_usd:.2f} "
+                                f"(Risk: {risk_assessment.risk_probability*100:.1f}%)"
+                            )
+                    else:
+                        logger.debug(f"[RISK] No assessment available for {symbol}")
+
+                except Exception as e:
+                    logger.warning(f"[RISK] Error during risk check: {e} - proceeding with trade")
 
             amount = position_size_usd / price
 
@@ -367,14 +473,20 @@ class HibachiTradeExecutor:
             if self.dry_run:
                 logger.info(f"🏃 DRY-RUN: Would close {symbol} position")
 
-                # Get tracker position for PnL
+                # Get tracker position for PnL with fee estimation
                 tracker_pos = self.tracker.get_open_trade_for_symbol(symbol)
                 if tracker_pos:
                     order_id = tracker_pos.get('order_id')
+                    entry_price = tracker_pos.get('entry_price', 0)
+                    size = tracker_pos.get('size', 0)
+                    # Estimate fees on entry notional * 2 (entry + exit)
+                    estimated_fees = (size * entry_price * 2) * self.fee_rate
+
                     self.tracker.log_exit(
                         order_id=order_id,
                         exit_price=0,  # Don't have real price in dry-run
-                        exit_reason=reason
+                        exit_reason=reason,
+                        fees=estimated_fees
                     )
 
                 return {
@@ -391,16 +503,27 @@ class HibachiTradeExecutor:
             if order:
                 logger.info(f"✅ Position closed: {order}")
 
-                # Get tracker position for PnL
+                # Get tracker position for PnL with fee estimation
                 tracker_pos = self.tracker.get_open_trade_for_symbol(symbol)
                 if tracker_pos:
                     price = await self.sdk.get_price(symbol)
                     order_id = tracker_pos.get('order_id')
+                    entry_price = tracker_pos.get('entry_price', 0)
+                    size = tracker_pos.get('size', 0)
+
+                    # Estimate round-trip fees (entry + exit)
+                    # Fee = notional * fee_rate for each leg
+                    entry_notional = size * entry_price
+                    exit_notional = size * (price if price else entry_price)
+                    estimated_fees = (entry_notional + exit_notional) * self.fee_rate
+
                     self.tracker.log_exit(
                         order_id=order_id,
                         exit_price=price if price else 0,
-                        exit_reason=reason
+                        exit_reason=reason,
+                        fees=estimated_fees
                     )
+                    logger.info(f"   Estimated fees: ${estimated_fees:.4f}")
 
                 return {
                     'success': True,

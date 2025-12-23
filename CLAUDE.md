@@ -1,4 +1,4 @@
-# Trading Bot - Claude Development Guide
+# Hopium Agents - AI Agent Guide
 
 ## 🎯 Core Mission (Original Tweet)
 
@@ -37,6 +37,43 @@ This bot MUST track and display ALL of these data sources in every decision:
 - Time estimates have no bearing on development work and should be omitted
 - Focus on what needs to be done, not how long it might take
 
+**CRITICAL - Blockchain Addresses**:
+- NEVER truncate, abbreviate, or test with partial blockchain addresses (e.g., "0x023a..." or "0xabcd")
+- ALWAYS use complete, full-length addresses when querying APIs
+- Partial addresses will return incorrect/empty data and waste debugging time
+- If an address is unknown, search for the full address first before querying
+
+---
+
+## Consulting Qwen (LLM API)
+
+To ask Qwen questions about trading strategy, performance, etc:
+
+```python
+import requests
+import os
+from dotenv import load_dotenv
+load_dotenv('.env')
+
+api_key = os.getenv('OPEN_ROUTER')
+response = requests.post(
+    "https://openrouter.ai/api/v1/chat/completions",
+    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+    json={
+        "model": "qwen/qwen-2.5-72b-instruct",  # or qwen/qwen3-32b
+        "messages": [
+            {"role": "system", "content": "You are an expert quant trader."},
+            {"role": "user", "content": "YOUR QUESTION HERE"}
+        ],
+        "max_tokens": 800
+    }
+)
+print(response.json()['choices'][0]['message']['content'])
+```
+
+**Key**: `OPEN_ROUTER` in `.env`
+**Models**: `qwen/qwen-2.5-72b-instruct` (best), `qwen/qwen3-32b` (reasoning mode)
+
 ## Data Sources & APIs
 
 ### Pacifica API
@@ -66,7 +103,7 @@ curl "https://api.pacifica.fi/api/v1/kline?symbol=SOL&interval=15m&start_time=17
 
 ### Cambrian API
 **Base URL**: `https://opabinia.cambrian.network/api/v1`
-**API Key**: `doug.ZbEScx8M4zlf7kDn`
+**API Key**: Set `CAMBRIAN_API_KEY` in `.env`
 **Docs Pattern**: Each endpoint has `/llms.txt` for AI-readable docs
 
 **Key Endpoints**:
@@ -81,12 +118,12 @@ curl "https://api.pacifica.fi/api/v1/kline?symbol=SOL&interval=15m&start_time=17
 **Example - Get 15m OHLCV data**:
 ```bash
 curl -X GET "https://opabinia.cambrian.network/api/v1/solana/ohlcv/token?token_address=So11111111111111111111111111111111111111112&after_time=1759858000&before_time=1759865709&interval=15m" \
-  -H "X-API-Key: doug.ZbEScx8M4zlf7kDn" \
+  -H "X-API-Key: $CAMBRIAN_API_KEY" \
   -H "Content-Type: application/json"
 ```
 
 **Important**:
-- API key header: `-H "X-API-Key: doug.ZbEScx8M4zlf7kDn"`
+- API key header: `-H "X-API-Key: $CAMBRIAN_API_KEY"`
 - Uses Unix timestamps (seconds, not milliseconds)
 - Response format: ClickHouse columnar format (columns + data array)
 
@@ -120,12 +157,7 @@ curl -X GET "https://opabinia.cambrian.network/api/v1/solana/ohlcv/token?token_a
 ### Lighter DEX API
 **Base URL**: `https://api.lighter.xyz`
 **Docs**: `https://apidocs.lighter.xyz`
-**Account Index**: `126039`
-**API Key Index**: `3`
-
-**API Keys** (from .env):
-- Public: `0x25c2a6a1482466ba1960d455c0d2f41f09a24d394cbaa8d7b7656ce73dfff244faf638580b44e7d9`
-- Private: `f4d86e544be209ed8926ec0f8eb162e6324dd69ab72e4e977028d07966678b18c5d42dc966247d49`
+**API Keys**: Set `LIGHTER_PUBLIC_KEY` and `LIGHTER_PRIVATE_KEY` in `.env`
 
 **Key Endpoints**:
 - `/candlesticks` - Historical candle data (need to test intervals)
@@ -137,13 +169,7 @@ curl -X GET "https://opabinia.cambrian.network/api/v1/solana/ohlcv/token?token_a
 
 ## Current Strategies
 
-See [strategies/README.md](strategies/README.md) for detailed strategy documentation including:
-- Active strategies (Pacifica orderbook imbalance, Lighter VWAP)
-- Entry/exit logic
-- Risk/reward ratios
-- Performance data
-- Fee structures
-- Future research
+Strategy history is tracked in `logs/strategy_switches.log`. The LLM prompt IS the strategy - we've iterated through 17 versions so far. See the README for highlights.
 
 ---
 
@@ -153,19 +179,22 @@ See [strategies/README.md](strategies/README.md) for detailed strategy documenta
 
 ### Directory Structure
 ```
-pacifica-trading-bot/
-├── bots/                    # Active bot executables
-├── dexes/                   # DEX-specific SDKs
-├── strategies/              # Strategy implementations
-├── scripts/                 # One-off scripts and utilities
-├── research/                # Research notes and analysis
-├── archive/                 # Deprecated code (timestamped)
-├── logs/                    # All log files (gitignored)
-├── docs/                    # Documentation
-├── config.py               # Global configuration
-├── risk_manager.py         # Risk management
-├── trade_tracker.py        # Trade tracking
-└── README.md               # Project overview
+hopium-agents/
+├── hibachi_agent/           # Hibachi exchange adapter
+├── lighter_agent/           # Lighter exchange adapter
+├── extended_agent/          # Extended Lighter adapter
+├── pacifica_agent/          # Pacifica exchange adapter
+├── llm_agent/               # Shared strategy engine
+│   ├── llm/                 # LLM integration
+│   ├── data/                # Market data fetchers
+│   └── prompts_archive/     # Historical prompts
+├── dexes/                   # Exchange SDKs
+├── research/                # Research and experiments
+├── scripts/                 # Utility scripts
+├── logs/                    # Trade logs (gitignored)
+├── config.py                # Global configuration
+├── trade_tracker.py         # Trade tracking
+└── README.md                # Project overview
 ```
 
 ### File Naming Conventions
@@ -219,39 +248,29 @@ Before any production deployment:
 
 ---
 
-## Active Bots
+## Agent Commands
 
-**Two autonomous trading bots** share the same LLM engine. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for complete details.
+All agents use the same centralized strategy system in `llm_agent/`. The exchange-specific code handles data fetching and order execution.
 
-### Quick Bot Commands
-
-**Lighter Bot** (zkSync, 101+ markets, zero fees):
 ```bash
-# Check status
-pgrep -f "lighter_agent.bot_lighter"
+# Check what's running
+ps aux | grep -E "(hibachi|lighter|extended|pacifica)_agent"
 
-# Start/stop
-nohup python3 -u -m lighter_agent.bot_lighter --live --interval 300 > logs/lighter_bot.log 2>&1 &
-pkill -f "lighter_agent.bot_lighter"
-
-# Logs
+# View logs
+tail -f logs/hibachi_bot.log
 tail -f logs/lighter_bot.log
+tail -f logs/extended_bot.log
+
+# Stop an agent
+pkill -f "hibachi_agent.bot_hibachi"
+pkill -f "lighter_agent.bot_lighter"
+pkill -f "extended_agent.bot_extended"
+
+# Start agents
+nohup python3 -u -m hibachi_agent.bot_hibachi --live --interval 600 > logs/hibachi_bot.log 2>&1 &
+nohup python3 -u -m lighter_agent.bot_lighter --live --interval 300 > logs/lighter_bot.log 2>&1 &
+nohup python3.11 -u -m extended_agent.bot_extended --live --strategy C --interval 300 > logs/extended_bot.log 2>&1 &
 ```
-
-**Pacifica Bot** (Solana, 4-5 liquid markets):
-```bash
-# Check status
-pgrep -f "pacifica_agent.bot_pacifica"
-
-# Start/stop
-nohup python3 -u -m pacifica_agent.bot_pacifica --live --interval 300 > logs/pacifica_bot.log 2>&1 &
-pkill -f "pacifica_agent.bot_pacifica"
-
-# Logs
-tail -f logs/pacifica_bot.log
-```
-
-**See [`USER_REFERENCE.md`](USER_REFERENCE.md) for complete command reference**
 
 ## Task Master AI Instructions
 **Import Task Master's development workflow commands and guidelines, treat as if import is in the main CLAUDE.md file.**

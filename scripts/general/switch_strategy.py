@@ -151,7 +151,7 @@ def main():
     parser.add_argument(
         "--dex",
         required=True,
-        choices=["lighter", "pacifica"],
+        choices=["lighter", "pacifica", "hibachi", "extended"],
         help="DEX to switch strategy for"
     )
     parser.add_argument(

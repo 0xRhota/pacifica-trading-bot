@@ -220,7 +220,14 @@ class IndicatorCalculator:
             result = df.copy()
 
             if timeframe == "5m":
-                # 5-minute indicators
+                # 5-minute indicators (optimized for HF scalping)
+                # SMA 10/30 for faster trend detection (was 20/50 - too slow)
+                result['sma_10'] = self.calculate_sma(df, period=10)
+                result['sma_30'] = self.calculate_sma(df, period=30)
+                result['sma_20'] = result['sma_10']  # Alias for backward compatibility
+                result['sma_50'] = result['sma_30']  # Alias for backward compatibility
+                result['sma_20_above_50'] = result['sma_10'] > result['sma_30']
+
                 # EMA (20 period)
                 result['ema_20'] = self.calculate_ema(df, period=20)
 

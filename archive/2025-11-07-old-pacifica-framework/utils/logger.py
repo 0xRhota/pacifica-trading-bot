@@ -216,9 +216,9 @@ if __name__ == "__main__":
     lighter_log.trade("SELL", "ETH-PERP", 0.1, 2500.00, "xyz789uvw123")
     lighter_log.position_update("ETH-PERP", -0.1, 2500.00, -1.25)
 
-    # Test redaction - these should be masked
-    pacifica_log.info("Testing key redaction: private_key=0xe2f8fb70539a9ed8a3c98c5775d19132c5e2eb8455531e908dc530a6075f92c7")
-    lighter_log.info("API key test: f4d86e544be209ed8926ec0f8eb162e6324dd69ab72e4e977028d07966678b18c5d42dc966247d49")
+    # Test redaction - these should be masked (using obviously fake test keys)
+    pacifica_log.info("Testing key redaction: private_key=0x0000000000000000000000000000000000000000000000000000000000000000")
+    lighter_log.info("API key test: 0000000000000000000000000000000000000000000000000000000000000000")
 
     print("\n✅ Logs created in logs/ directory")
     print("✅ All sensitive data redacted automatically")

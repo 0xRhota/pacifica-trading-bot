@@ -4,6 +4,13 @@ Organized research notes and analysis for the trading bot.
 
 ## Structure
 
+### Latest Research (November 2025)
+
+- `2025-11-27-copy-trading-pivot/` - **CURRENT** Strategic pivot from funding arb to copy trading
+  - COMPREHENSIVE_STRATEGY_PIVOT_REPORT.md - Full research report
+  - QWEN_REASONING_ANALYSIS.md - Qwen deep reasoning analysis
+  - Key findings: Abandon funding arb (need $10k+), abandon scalping, copy swing traders
+
 ### Active Research
 - `agent-lightning/` - Agent Lightning framework research
 - `cambrian/` - Cambrian API integration research

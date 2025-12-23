@@ -16,18 +16,19 @@ class HardExitRules:
     """
     Enforces hard exit rules that override LLM decisions.
 
-    Rules:
-    1. Minimum hold time: 2 hours (prevent quick exits)
-    2. Profit target: +2% (force take profit)
-    3. Stop loss: -1.5% (force cut losses)
-    4. Technical invalidation: RSI/MACD reversal (exit if setup breaks)
+    Rules (UPDATED 2025-12-02 - Backtest Proven):
+    1. Minimum hold time: NONE (allow quick exits)
+    2. Profit target: +1.5% (force take profit - was 2%)
+    3. Stop loss: -2.0% (cap losses - was 1.5%)
+    4. Time exit: 1h max, only if +0.5% profit
     """
 
     def __init__(
         self,
-        min_hold_hours: float = 2.0,
-        profit_target_pct: float = 2.0,
-        stop_loss_pct: float = 1.5
+        min_hold_hours: float = 0.0,  # No minimum (was 2.0)
+        profit_target_pct: float = 1.5,  # +1.5% TP (was 2.0)
+        stop_loss_pct: float = 2.0,  # -2.0% SL (was 1.5)
+        max_hold_hours: float = 1.0  # NEW: 1h time limit
     ):
         """
         Initialize hard exit rules
@@ -40,6 +41,7 @@ class HardExitRules:
         self.min_hold_hours = min_hold_hours
         self.profit_target_pct = profit_target_pct
         self.stop_loss_pct = stop_loss_pct
+        self.max_hold_hours = max_hold_hours  # NEW
 
     def check_should_force_close(
         self,
@@ -92,6 +94,15 @@ class HardExitRules:
                 # This rule PREVENTS closing, not forces it
                 # We'll handle this in the caller
                 pass
+
+            # RULE 3.5: TIME EXIT (Only if profitable +0.5%)
+            if self.max_hold_hours and hold_hours >= self.max_hold_hours:
+                if pnl_pct >= 0.5:  # Only exit if +0.5% or better
+                    logger.info(f"⏰ HARD RULE: {symbol} TIME EXIT (profitable +{pnl_pct:.2f}% after {hold_hours:.2f}h)")
+                    return True, f"TIME EXIT: {hold_hours:.2f}h (P/L: +{pnl_pct:.2f}%)"
+                else:
+                    # Don't exit if losing - wait for stop or reversal
+                    logger.debug(f"HARD RULE: {symbol} aged {hold_hours:.2f}h but unprofitable ({pnl_pct:+.2f}%) - waiting")
 
         # RULE 4: Technical invalidation
         # Check if the technical setup that justified entry has broken down

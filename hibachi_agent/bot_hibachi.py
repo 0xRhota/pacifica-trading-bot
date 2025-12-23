@@ -28,7 +28,12 @@ from trade_tracker import TradeTracker
 from dexes.hibachi import HibachiSDK
 from hibachi_agent.execution.hibachi_executor import HibachiTradeExecutor
 from hibachi_agent.execution.hard_exit_rules import HardExitRules
+from hibachi_agent.execution.strategy_a_exit_rules import StrategyAExitRules
+from hibachi_agent.execution.fast_exit_monitor import FastExitMonitor
+from hibachi_agent.execution.strategy_f_self_improving import StrategyFSelfImproving
 from hibachi_agent.data.hibachi_aggregator import HibachiMarketDataAggregator
+from hibachi_agent.data.whale_signal import WhaleSignalFetcher
+from utils.cambrian_risk_engine import CambrianRiskEngine
 
 # Load environment variables from project root
 project_root_env = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
@@ -48,7 +53,7 @@ logging.basicConfig(
 logging.getLogger('hibachi_agent.data.hibachi_fetcher').setLevel(logging.WARNING)
 logging.getLogger('urllib3').setLevel(logging.ERROR)
 logging.getLogger('asyncio').setLevel(logging.ERROR)
-logging.getLogger('dexes.hibachi.hibachi_sdk').setLevel(logging.WARNING)
+logging.getLogger('dexes.hibachi.hibachi_sdk').setLevel(logging.INFO)  # Show order creation logs
 
 logger = logging.getLogger(__name__)
 logger.info(f"✅ Loaded environment variables from: {project_root_env}")
@@ -65,11 +70,12 @@ class HibachiTradingBot:
         hibachi_api_secret: str,
         hibachi_account_id: str,
         dry_run: bool = True,
-        check_interval: int = 300,  # 5 minutes
-        position_size: float = 5.0,  # $5 per trade (~8% of $58 account)
-        max_positions: int = 10,
+        check_interval: int = 600,  # 10 minutes (was 5min - reduced to cut fees by 50%)
+        position_size: float = 10.0,  # $10 per trade (was $5 - bigger bets on high conviction)
+        max_positions: int = 5,  # 5 max (was 10 - fewer positions = more focus)
         max_position_age_minutes: int = 240,  # 4 hours
-        model: str = "deepseek-chat"  # LLM model to use
+        model: str = "qwen-max",  # LLM model to use (Qwen - Alpha Arena winner)
+        strategy: str = "F"  # Strategy to use (F = Self-Improving LLM)
     ):
         """
         Initialize Hibachi trading bot
@@ -81,9 +87,9 @@ class HibachiTradingBot:
             hibachi_api_secret: Hibachi API secret
             hibachi_account_id: Hibachi account ID
             dry_run: If True, simulate trades without execution
-            check_interval: Seconds between decision checks (default: 300 = 5 min)
-            position_size: USD per trade (default: $5)
-            max_positions: Max open positions (default: 10)
+            check_interval: Seconds between decision checks (default: 600 = 10 min)
+            position_size: USD per trade (default: $10)
+            max_positions: Max open positions (default: 5)
             max_position_age_minutes: Max position age in minutes before auto-close (default: 240)
             model: LLM model to use (default: deepseek-chat, options: qwen-max)
         """
@@ -125,15 +131,19 @@ class HibachiTradingBot:
 
         self.trade_tracker = TradeTracker(dex="hibachi")
 
-        # Initialize executor
+        # Initialize executor with Cambrian Risk Engine
         self.executor = HibachiTradeExecutor(
             hibachi_sdk=self.hibachi_sdk,
             trade_tracker=self.trade_tracker,
             dry_run=dry_run,
             default_position_size=position_size,
             max_positions=max_positions,
-            max_position_age_minutes=max_position_age_minutes
+            max_position_age_minutes=max_position_age_minutes,
+            cambrian_api_key=cambrian_api_key  # For risk engine
         )
+
+        # Store Cambrian API key for risk metrics in prompt
+        self.cambrian_api_key = cambrian_api_key
 
         # Track last deep research cycle
         self.last_deep_research_time = datetime.now()
@@ -145,13 +155,58 @@ class HibachiTradingBot:
         # Store position size for logging
         self.position_size = position_size
 
-        # Initialize hard exit rules - AGGRESSIVE SCALPING (tightened stop-loss)
-        self.hard_exit_rules = HardExitRules(
-            min_hold_hours=0.25,     # 15 min minimum hold (fast scalps)
-            profit_target_pct=1.5,   # Force close at +1.5% (quick profits)
-            stop_loss_pct=0.5        # Force close at -0.5% (TIGHTER stop - was 0.8%)
+        # Initialize Strategy A exit rules (TIME_CAPPED)
+        # Based on 2025-11-27 research: 4% TP, 1% SL, 1 hour max hold
+        self.exit_rules = StrategyAExitRules()
+
+        # Keep legacy hard_exit_rules for backward compatibility (maps to strategy A)
+        self.hard_exit_rules = self.exit_rules
+
+        # Initialize Fast Exit Monitor (checks every 30s, NO LLM cost)
+        # This catches TP/SL faster than the 5-min LLM cycles
+        self.fast_exit_monitor = FastExitMonitor(
+            sdk=self.hibachi_sdk,
+            executor=self.executor,
+            exit_rules=self.exit_rules,
+            trade_tracker=self.trade_tracker,
+            enabled=True  # Always enabled for faster exits
         )
-        logger.info("✅ Hard exit rules enabled: 15min min hold, +1.5% target, -0.5% stop (TIGHTER)")
+        self.fast_exit_task = None  # Will be set when run() starts
+
+        # Initialize Whale Signal Fetcher (0x023a - $28M proven trader)
+        self.whale_signal = WhaleSignalFetcher()
+
+        # Initialize Strategy F: Self-Improving LLM (if selected)
+        self.strategy = strategy
+        self.strategy_f = None
+        if strategy.upper() == "F":
+            self.strategy_f = StrategyFSelfImproving(
+                position_size=position_size,
+                review_interval=10,  # Review every 10 trades
+                rolling_window=50,   # Analyze last 50 trades
+                log_dir="logs/strategies"
+            )
+            logger.info("=" * 60)
+            logger.info("HIBACHI BOT v8 - SELF-IMPROVING LLM (Strategy F)")
+            logger.info("  Mode: Dynamic filtering based on performance")
+            logger.info("  Review: Every 10 trades")
+            logger.info("  Auto-block: <30% win rate combos")
+            logger.info("  Auto-reduce: <40% win rate combos")
+            logger.info("  Deep42 + Whale Signal: Still active")
+            logger.info("  Fast Exit: 30s monitoring (FREE)")
+            logger.info("=" * 60)
+
+            # Wire up FastExitMonitor to record exits for self-improving learning
+            self.fast_exit_monitor.exit_callback = self.strategy_f.record_exit
+        else:
+            logger.info("=" * 60)
+            logger.info("HIBACHI BOT v7 - DEEP42 BIAS + WHALE SIGNAL")
+            logger.info("  TP: +4%  |  SL: -2%  |  Max Hold: 2 hours")
+            logger.info("  Deep42: Live directional bias (4h cache)")
+            logger.info("  Fast Exit: 30s monitoring (FREE - no LLM)")
+            logger.info("  Whale Signal: 0x023a positions as LLM context")
+            logger.info("  Min confidence: 0.7 (raised from 0.6)")
+            logger.info("=" * 60)
 
         logger.info("✅ Hibachi Trading Bot initialized successfully")
 
@@ -178,8 +233,8 @@ class HibachiTradingBot:
 
             logger.info(f"✅ Fetched data for {len(market_data_dict)} markets")
 
-            # Get macro context
-            macro_context = self.aggregator.get_macro_context()
+            # HIBACHI: Skip macro context - not useful for high-frequency scalping
+            # macro_context = self.aggregator.get_macro_context()  # DISABLED
 
             # Get current positions from executor
             logger.info("📊 Fetching current positions...")
@@ -323,6 +378,17 @@ class HibachiTradingBot:
 
                     if close_result.get('success'):
                         logger.info(f"      ✅ Forced close executed successfully")
+
+                        # STRATEGY F: Record trade exit for learning
+                        if self.strategy_f:
+                            exit_price = close_result.get('exit_price', current_price)
+                            pnl_usd = close_result.get('pnl', 0)
+                            self.strategy_f.record_exit(
+                                symbol=symbol,
+                                exit_price=exit_price,
+                                pnl_usd=pnl_usd
+                            )
+
                         # Remove from open_positions list
                         open_positions = [p for p in open_positions if p.get('symbol') != symbol]
                     else:
@@ -331,13 +397,8 @@ class HibachiTradingBot:
             if forced_closes:
                 logger.info(f"   📊 Executed {len(forced_closes)} forced closes via hard rules")
 
-            # Get macro context only for V1 (V2 doesn't use it)
-            prompt_version = self.llm_agent.prompt_formatter.get_prompt_version()
-            if prompt_version == "v1_original":
-                # macro_context already fetched above
-                pass
-            else:
-                macro_context = None  # V2 doesn't use macro context
+            # HIBACHI: No macro context needed for high-frequency scalping
+            # Removed v1/v2 check - Hibachi always uses pure technicals
 
             # Format market table
             market_table = self.aggregator.format_market_table(market_data_dict)
@@ -372,29 +433,117 @@ class HibachiTradingBot:
             # Hibachi markets list
             hibachi_symbols = list(market_data_dict.keys())
 
+            # ═══════════════════════════════════════════════════════════════
+            # CAMBRIAN RISK ENGINE - Pre-compute risk for all tradeable symbols
+            # This gives the LLM visibility into liquidation risk BEFORE it decides
+            # ═══════════════════════════════════════════════════════════════
+            risk_context = ""
+            if self.executor.risk_engine:
+                logger.info("")
+                logger.info("=" * 60)
+                logger.info("📊 CAMBRIAN RISK ENGINE - Pre-Trade Analysis")
+                logger.info("=" * 60)
+
+                risk_data = []
+                for symbol in hibachi_symbols:
+                    # Get current price from market data
+                    market_info = market_data_dict.get(symbol, {})
+                    price = market_info.get('price', 0)
+
+                    if not price or price <= 0:
+                        continue
+
+                    # Check risk for both LONG and SHORT at average leverage (2.5x)
+                    # Actual leverage will be 1.5x-4x based on LLM confidence
+                    for direction in ["long", "short"]:
+                        assessment = self.executor.risk_engine.assess_risk(
+                            symbol=symbol,
+                            entry_price=price,
+                            leverage=2.5,  # Average expected leverage
+                            direction=direction,
+                            risk_horizon="1d"
+                        )
+
+                        if assessment:
+                            risk_data.append({
+                                'symbol': symbol,
+                                'direction': direction.upper(),
+                                'price': price,
+                                'risk_pct': assessment.risk_probability * 100,
+                                'liq_price': assessment.liquidation_price,
+                                'sigmas': assessment.sigmas_away,
+                                'volatility': assessment.volatility * 100,
+                                'level': assessment.risk_level,
+                                'emoji': assessment.risk_emoji
+                            })
+
+                            logger.info(f"  {assessment.to_log_string()}")
+
+                # Build risk context for LLM prompt
+                if risk_data:
+                    risk_context = "\n\nRISK ANALYSIS (Cambrian Monte Carlo - 10,000 simulations, ~2.5x avg leverage, 1d horizon):\n"
+                    risk_context += "Symbol | Direction | Liq Risk | Liq Price | Volatility | Verdict\n"
+                    risk_context += "-" * 75 + "\n"
+
+                    for r in risk_data:
+                        risk_context += (
+                            f"{r['symbol']:12} | {r['direction']:5} | {r['risk_pct']:5.1f}% | "
+                            f"${r['liq_price']:<10.2f} | {r['volatility']:5.1f}% | "
+                            f"{r['emoji']} {r['level']}\n"
+                        )
+
+                    risk_context += "\nNOTE: Avoid trades with risk >5%. High volatility = high liquidation risk.\n"
+
+                logger.info("=" * 60)
+                logger.info("")
+
+            # ═══════════════════════════════════════════════════════════════
+            # WHALE SIGNAL - Fetch 0x023a positions as context for LLM
+            # This is NOT copy trading - just another signal input for Qwen
+            # ═══════════════════════════════════════════════════════════════
+            whale_context = ""
+            try:
+                self.whale_signal.log_status()
+                whale_context = self.whale_signal.format_for_prompt()
+                if whale_context:
+                    logger.info("[WHALE] Signal context added to LLM prompt")
+            except Exception as e:
+                logger.warning(f"[WHALE] Could not fetch whale signal: {e}")
+
             # Build kwargs based on prompt version
             prompt_kwargs = {
                 "market_table": market_table,
                 "open_positions": open_positions,
                 "account_balance": account_balance,
                 "hourly_review": None,  # Not implemented yet
-                "trade_history": trade_history,
+                "trade_history": trade_history + risk_context + whale_context,  # Append risk + whale data
                 "recently_closed_symbols": recently_closed or [],
                 "dex_name": "Hibachi",
                 "analyzed_tokens": hibachi_symbols
             }
 
-            # V1 uses macro_context and deep42_context, V2 doesn't
-            if prompt_version == "v1_original":
-                prompt_kwargs["macro_context"] = macro_context
-                # Enable Deep42 multi-timeframe context
-                try:
-                    enhanced_deep42 = self.aggregator.macro_fetcher.get_enhanced_context()
-                    prompt_kwargs["deep42_context"] = enhanced_deep42
-                    logger.info("✅ Using Deep42 multi-timeframe context")
-                except Exception as e:
-                    logger.error(f"Failed to get enhanced Deep42 context: {e}")
-                    prompt_kwargs["deep42_context"] = None
+            # HIBACHI v7: Enable Deep42 directional bias (4h cache)
+            # We're no longer high-frequency scalping - 10min intervals with 2hr max holds
+            # Deep42 gives us AI-analyzed market direction (LONG/SHORT bias)
+            deep42_bias = self.aggregator.get_directional_bias()
+            if deep42_bias:
+                logger.info("📊 Deep42 directional bias loaded (4h cache)")
+                # Append to trade_history context so LLM sees it
+                prompt_kwargs["trade_history"] += f"\n\n=== DEEP42 MARKET DIRECTION (AI Analysis - 4h cache) ===\n{deep42_bias}\n"
+            else:
+                logger.warning("⚠️ Deep42 directional bias unavailable")
+
+            # ═══════════════════════════════════════════════════════════════
+            # STRATEGY F: Add self-improvement context to prompt
+            # ═══════════════════════════════════════════════════════════════
+            if self.strategy_f:
+                strategy_context = self.strategy_f.get_prompt_enhancement()
+                if strategy_context:
+                    prompt_kwargs["trade_history"] += strategy_context
+                    logger.info("🧠 Strategy F: Added performance context to LLM prompt")
+                logger.info("⚡ Hibachi v8: Self-Improving LLM + Deep42 + whale signal")
+            else:
+                logger.info("⚡ Hibachi v7: Using Deep42 bias + whale signal + technicals")
 
             prompt = self.llm_agent.prompt_formatter.format_trading_prompt(**prompt_kwargs)
 
@@ -496,7 +645,7 @@ class HibachiTradingBot:
                                     pnl_pct = 0
 
                                 should_prevent, prevent_reason = self.hard_exit_rules.should_prevent_close(
-                                    tracker_data,
+                                    symbol,
                                     pnl_pct
                                 )
 
@@ -600,10 +749,67 @@ class HibachiTradingBot:
                 logger.info(f"\n[{i}/{len(decisions)}] {action} {symbol}")
                 logger.info(f"   Reasoning: {decision.get('reasoning', 'N/A')}")
 
+                # TREND FILTER (2025-12-02): Block shorts in bullish trends
+                if action == "SHORT":
+                    # Get market data for this symbol
+                    symbol_data = market_data_dict.get(symbol, {})
+                    sma20 = symbol_data.get('sma20')
+                    sma50 = symbol_data.get('sma50')
+                    current_price = symbol_data.get('price')
+
+                    if sma20 and sma50 and current_price:
+                        if sma20 > sma50 and current_price > sma20:
+                            logger.warning(f"  ⛔ REJECTED: Cannot SHORT {symbol} in bullish trend")
+                            logger.warning(f"     SMA20 ({sma20:.2f}) > SMA50 ({sma50:.2f}), Price ({current_price:.2f}) > SMA20")
+                            logger.warning(f"     Trend filter protecting from bad short")
+                            continue  # Skip this decision
+
+                # ═══════════════════════════════════════════════════════════════
+                # STRATEGY F: DYNAMIC PERFORMANCE-BASED FILTERS
+                # Replaces hardcoded filters with self-learning system
+                # ═══════════════════════════════════════════════════════════════
+                if self.strategy_f:
+                    # Apply dynamic filters from Strategy F
+                    decision, rejection_reason = self.strategy_f.filter_decision(decision)
+                    if rejection_reason:
+                        logger.warning(f"  ⛔ STRATEGY F: {rejection_reason}")
+                        continue  # Skip this decision
+                else:
+                    # Legacy hardcoded filters (when Strategy F not active)
+                    # FILTER 1: Block low-confidence shorts (34% win rate is unacceptable)
+                    if action == "SHORT":
+                        confidence = decision.get('confidence', 0.5)
+                        if confidence < 0.9:
+                            logger.warning(f"  ⛔ BLOCKED: SHORT requires 0.9+ confidence (got {confidence:.2f})")
+                            logger.warning(f"     Historical: SHORTS have 34% win rate, -$46 total loss")
+                            continue  # Skip this decision
+                        else:
+                            logger.info(f"  ✅ HIGH-CONFIDENCE SHORT allowed ({confidence:.2f})")
+
+                    # FILTER 2: Reduce SOL position size (worst PnL despite decent win rate)
+                    if symbol == "SOL/USDT-P":
+                        original_size = decision.get('position_size_usd', self.position_size)
+                        reduced_size = original_size * 0.5
+                        decision['position_size_usd'] = reduced_size
+                        logger.warning(f"  ⚠️ SOL RISK REDUCTION: Position size ${original_size:.2f} → ${reduced_size:.2f}")
+                        logger.warning(f"     Historical: SOL has -$38 PnL despite 40% win rate")
+
                 result = await self.executor.execute_decision(decision)
 
                 if result.get('success'):
                     logger.info(f"   ✅ Execution successful")
+
+                    # STRATEGY F: Record trade entry for learning
+                    if self.strategy_f and action in ["LONG", "SHORT"]:
+                        entry_price = result.get('entry_price', 0)
+                        if not entry_price:
+                            # Try to get from market data
+                            entry_price = market_data_dict.get(symbol, {}).get('price', 0)
+                        self.strategy_f.record_entry(
+                            decision=decision,
+                            entry_price=entry_price,
+                            llm_reasoning=decision.get('reasoning', '')
+                        )
                 else:
                     logger.warning(f"   ⚠️  Execution failed: {result.get('error', 'Unknown')}")
 
@@ -622,13 +828,18 @@ class HibachiTradingBot:
         logger.info("=" * 80)
 
     async def run(self):
-        """Run continuous trading loop"""
+        """Run continuous trading loop with fast exit monitoring"""
         logger.info("🚀 Starting Hibachi trading bot...")
         logger.info(f"   Mode: {['LIVE', 'DRY-RUN'][self.dry_run]}")
-        logger.info(f"   Check Interval: {self.check_interval}s")
+        logger.info(f"   Check Interval: {self.check_interval}s (LLM decisions)")
+        logger.info(f"   Fast Exit: 30s (price-only, FREE)")
         logger.info(f"   Position Size: ${self.position_size}")
 
         cycle_count = 0
+
+        # Start fast exit monitor as background task
+        self.fast_exit_task = asyncio.create_task(self.fast_exit_monitor.run())
+        logger.info("⚡ Fast exit monitor started (30s price checks)")
 
         try:
             while True:
@@ -637,6 +848,10 @@ class HibachiTradingBot:
                 logger.info(f"🔄 Cycle {cycle_count} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                 logger.info(f"{'='*80}")
 
+                # Log fast exit stats periodically
+                if cycle_count % 6 == 0:  # Every 30 minutes
+                    self.fast_exit_monitor.log_stats()
+
                 await self.run_once()
 
                 logger.info(f"⏳ Waiting {self.check_interval}s until next cycle...")
@@ -644,8 +859,14 @@ class HibachiTradingBot:
 
         except KeyboardInterrupt:
             logger.info("\n👋 Shutting down gracefully...")
+            self.fast_exit_monitor.stop()
+            if self.fast_exit_task:
+                self.fast_exit_task.cancel()
         except Exception as e:
             logger.error(f"❌ Fatal error: {e}", exc_info=True)
+            self.fast_exit_monitor.stop()
+            if self.fast_exit_task:
+                self.fast_exit_task.cancel()
 
 
 def main():
@@ -654,10 +875,13 @@ def main():
     parser.add_argument('--dry-run', action='store_true', help='Dry run mode (no real trades)')
     parser.add_argument('--live', action='store_true', help='Live trading mode')
     parser.add_argument('--once', action='store_true', help='Run once and exit')
-    parser.add_argument('--interval', type=int, default=300, help='Check interval in seconds (default: 300)')
-    parser.add_argument('--model', type=str, default='deepseek-chat',
+    parser.add_argument('--interval', type=int, default=600, help='Check interval in seconds (default: 600)')
+    parser.add_argument('--model', type=str, default='qwen-max',
                         choices=['deepseek-chat', 'qwen-max'],
-                        help='LLM model to use (default: deepseek-chat, qwen-max = Alpha Arena winner)')
+                        help='LLM model to use (default: qwen-max = Alpha Arena winner)')
+    parser.add_argument('--strategy', type=str, default='F',
+                        choices=['F', 'legacy'],
+                        help='Strategy to use: F=Self-Improving LLM (default), legacy=hardcoded filters')
 
     args = parser.parse_args()
 
@@ -715,7 +939,8 @@ def main():
         hibachi_account_id=hibachi_account_id,
         dry_run=dry_run,
         check_interval=args.interval,
-        model=model  # Pass model choice
+        model=model,  # Pass model choice
+        strategy=args.strategy  # Strategy F (self-improving) or legacy
     )
 
     # Run bot

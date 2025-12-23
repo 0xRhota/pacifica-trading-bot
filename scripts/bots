@@ -1,0 +1,64 @@
+#!/bin/bash
+# Quick bot status checker
+# Usage: ./scripts/bots
+
+echo ""
+echo "═══════════════════════════════════════════════════════════"
+echo "  LIVE TRADING BOTS"
+echo "═══════════════════════════════════════════════════════════"
+echo ""
+
+# Get all running bot processes
+ps aux | grep -E "(lighter_agent|pacifica_agent|hibachi_agent|extended_agent)\.bot" | grep -v grep | while read line; do
+    pid=$(echo "$line" | awk '{print $2}')
+    cpu=$(echo "$line" | awk '{print $3}')
+    mem=$(echo "$line" | awk '{print $4}')
+    start=$(echo "$line" | awk '{print $9}')
+
+    # Extract bot name and flags
+    if echo "$line" | grep -q "lighter_agent"; then
+        bot="LIGHTER"
+        dex="zkSync"
+    elif echo "$line" | grep -q "pacifica_agent"; then
+        bot="PACIFICA"
+        dex="Solana"
+    elif echo "$line" | grep -q "hibachi_agent"; then
+        bot="HIBACHI"
+        dex="Hibachi"
+    elif echo "$line" | grep -q "extended_agent"; then
+        bot="EXTENDED"
+        dex="Starknet"
+    else
+        bot="UNKNOWN"
+        dex="?"
+    fi
+
+    # Check for model flag
+    if echo "$line" | grep -q "qwen-max"; then
+        model="qwen-max"
+    elif echo "$line" | grep -q "deepseek"; then
+        model="deepseek"
+    else
+        model="default"
+    fi
+
+    # Check mode
+    if echo "$line" | grep -q "\-\-live"; then
+        mode="🟢 LIVE"
+    elif echo "$line" | grep -q "\-\-dry-run"; then
+        mode="🟡 DRY"
+    else
+        mode="⚪ ?"
+    fi
+
+    printf "  %-10s │ %-8s │ %s │ %-10s │ PID: %-6s │ Since: %s\n" "$bot" "$dex" "$mode" "$model" "$pid" "$start"
+done
+
+# Count
+count=$(ps aux | grep -E "(lighter_agent|pacifica_agent|hibachi_agent|extended_agent)\.bot" | grep -v grep | wc -l | tr -d ' ')
+
+echo ""
+echo "───────────────────────────────────────────────────────────"
+echo "  Total: $count bot(s) running"
+echo "═══════════════════════════════════════════════════════════"
+echo ""

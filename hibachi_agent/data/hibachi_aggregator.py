@@ -21,9 +21,13 @@ from hibachi_agent.data.hibachi_fetcher import HibachiDataFetcher
 
 logger = logging.getLogger(__name__)
 
-# Blacklist worst-performing symbols (0-33% win rates from 399 trade analysis)
-# SEI: -$0.68 total loss, ZEC: -$0.62, SUI: 0% win rate
-BLACKLISTED_SYMBOLS = {"SEI/USDT-P", "ZEC/USDT-P", "SUI/USDT-P"}
+# WHITELIST: Only trade profitable symbols
+# Based on 5000+ trade analysis (2025-12-18):
+#   - SOL: -$73.38 total loss, worst performer - BLOCKED
+#   - ETH: -$35.94 total loss - questionable but keep for now
+#   - BTC SHORT only: +$19.20 profit, 33% win rate - ONLY profitable combo
+# Removing SOL entirely - it consistently loses
+WHITELISTED_SYMBOLS = {"ETH/USDT-P", "BTC/USDT-P"}
 
 
 class HibachiMarketDataAggregator:
@@ -37,7 +41,7 @@ class HibachiMarketDataAggregator:
         self,
         cambrian_api_key: str,
         sdk=None,
-        interval: str = "15m",
+        interval: str = "5m",  # 5m candles for HF scalping (was 15m)
         candle_limit: int = 100,
         macro_refresh_hours: int = 12
     ):
@@ -47,7 +51,7 @@ class HibachiMarketDataAggregator:
         Args:
             cambrian_api_key: Cambrian API key for Deep42 (macro context only)
             sdk: HibachiSDK instance for fetching market metadata
-            interval: Candle interval (default: 15m)
+            interval: Candle interval (default: 5m for HF scalping)
             candle_limit: Number of candles to fetch (default: 100)
             macro_refresh_hours: Hours between macro context refreshes (default: 12)
         """
@@ -71,15 +75,16 @@ class HibachiMarketDataAggregator:
     def hibachi_markets(self) -> List[str]:
         """
         Get list of available Hibachi markets from fetcher
-        Excludes blacklisted symbols (SEI, ZEC, SUI - worst performers)
+        WHITELIST: Only ETH, BTC (SOL blocked due to consistent losses)
 
         Returns:
             List of symbol strings
         """
         all_symbols = self.hibachi.available_symbols
-        filtered = [s for s in all_symbols if s not in BLACKLISTED_SYMBOLS]
-        if len(filtered) < len(all_symbols):
-            logger.info(f"Blacklist active: excluded {len(all_symbols) - len(filtered)} symbols (SEI, ZEC, SUI)")
+        # WHITELIST mode: only trade specific symbols
+        filtered = [s for s in all_symbols if s in WHITELISTED_SYMBOLS]
+        symbol_names = [s.split('/')[0] for s in filtered]
+        logger.info(f"Whitelist active: trading only {len(filtered)} symbols ({', '.join(symbol_names)})")
         return filtered
 
     async def fetch_market_data(self, symbol: str) -> Optional[Dict]:
@@ -196,6 +201,13 @@ class HibachiMarketDataAggregator:
     def get_macro_context(self, force_refresh: bool = False) -> str:
         """Get macro market context"""
         return self.macro_fetcher.get_macro_context(force_refresh=force_refresh)
+
+    def get_directional_bias(self, force_refresh: bool = False) -> str:
+        """
+        Get Deep42's directional bias for BTC/market (4h cache)
+        Returns raw Deep42 response for LLM to interpret
+        """
+        return self.macro_fetcher.get_btc_health(force_refresh=force_refresh)
 
     def format_market_table(self, market_data: Dict[str, Dict]) -> str:
         """

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # Options: "v1_original", "v2_deep_reasoning", "v7_alpha_arena", "v8_pure_pnl", "v9_qwen_enhanced"
 # v8_pure_pnl: Pure PnL focus - low frequency, high conviction, let winners run
 # v9_qwen_enhanced: Qwen's comprehensive scoring system with funding zones & OI confluence
-ACTIVE_PROMPT_VERSION: Literal["v1_original", "v2_deep_reasoning", "v7_alpha_arena", "v8_pure_pnl", "v9_qwen_enhanced"] = "v1_original"
+ACTIVE_PROMPT_VERSION: Literal["v1_original", "v2_deep_reasoning", "v7_alpha_arena", "v8_pure_pnl", "v9_qwen_enhanced"] = "v9_qwen_enhanced"
 
 # ============================================================================
 # Strategy Descriptions
@@ -184,12 +184,24 @@ def get_prompt_formatter():
 
     # Import the module
     import importlib
+    import os
     module = importlib.import_module(module_path)
 
     # Get the class
     formatter_class = getattr(module, class_name)
 
-    # Return instance
+    # Check if strategy has a file to load
+    strategy_file = strategy.get('strategy_file')
+    if strategy_file:
+        # Resolve relative path from project root
+        if not os.path.isabs(strategy_file):
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            strategy_file = os.path.join(project_root, strategy_file)
+
+        logger.info(f"📂 Loading strategy file: {strategy_file}")
+        return formatter_class(strategy_file=strategy_file)
+
+    # Return instance without strategy file
     return formatter_class()
 
 

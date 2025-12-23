@@ -28,9 +28,11 @@ class HibachiSDK:
         self.base_url = "https://api.hibachi.xyz"
         self.data_api_url = "https://data-api.hibachi.xyz"
         self.api_key = api_key
-        # Use API secret as-is (string) for HMAC signing
+        # Per official Hibachi TypeScript SDK (sdk_hmac.ts), use raw string bytes
+        # Buffer.from('your-private-key') in Node.js = UTF-8 encoding by default
         self.api_secret_bytes = api_secret.encode('utf-8')
         self._account_id = account_id  # Account ID from Hibachi UI (Settings → API Keys)
+        logger.debug(f"SDK initialized with secret length: {len(self.api_secret_bytes)} bytes")
 
     def _get_headers(self) -> Dict[str, str]:
         """
@@ -413,8 +415,10 @@ class HibachiSDK:
             signature = self._sign_order_buffer(buffer)
 
             # Build order request
-            # Format quantity as decimal string (avoid scientific notation like 2.24887e-05)
-            quantity_str = f"{amount:.8f}".rstrip('0').rstrip('.')
+            # CRITICAL: quantity_str MUST match quantity_int exactly!
+            # The server recalculates quantity_int from quantity_str for signature verification.
+            # Compute quantity_str from quantity_int to ensure exact match.
+            quantity_str = f"{quantity_int / (10 ** underlying_decimals):.{underlying_decimals}f}".rstrip('0').rstrip('.')
 
             order_data = {
                 "accountId": int(account_id),

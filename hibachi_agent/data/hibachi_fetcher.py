@@ -1,12 +1,16 @@
 """
 Hibachi DEX Data Fetcher
-Uses HibachiSDK for market data
+Uses HibachiSDK for market data + Binance proxy for candles
+
+Since Hibachi doesn't provide historical candles, we use Binance Futures
+as a proxy (same underlying assets: BTC, ETH, SOL, etc.)
 """
 
 import logging
 import pandas as pd
 from typing import Optional, Dict, List
 from datetime import datetime
+from hibachi_agent.data.binance_proxy import BinanceFuturesProxy
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +18,7 @@ logger = logging.getLogger(__name__)
 class HibachiDataFetcher:
     """
     Fetch market data from Hibachi DEX using HibachiSDK
+    Uses Binance Futures as proxy for candle data (Hibachi doesn't provide historical candles)
     """
 
     def __init__(self, sdk=None):
@@ -26,6 +31,9 @@ class HibachiDataFetcher:
         self.sdk = sdk
         self.available_symbols = []
         self._initialized = False
+        # Binance proxy for candle data
+        self.binance_proxy = BinanceFuturesProxy()
+        logger.info("✅ Initialized Binance proxy for candle data")
 
     async def _initialize_symbols(self):
         """
@@ -54,18 +62,18 @@ class HibachiDataFetcher:
     async def fetch_kline(
         self,
         symbol: str,
-        interval: str = "15m",
+        interval: str = "5m",  # Default to 5m for HF scalping (was 15m)
         limit: int = 100
     ) -> Optional[pd.DataFrame]:
         """
-        Fetch kline (OHLCV) data for a symbol
+        Fetch kline (OHLCV) data for a symbol via Binance proxy
 
-        Note: Hibachi SDK doesn't have historical kline endpoint yet
-        For now, return None - will need to add this to SDK or use mock data
+        Uses Binance Futures as data source since Hibachi doesn't provide historical candles.
+        Same underlying assets (BTC, ETH, SOL) so price action is correlated.
 
         Args:
             symbol: Trading symbol (e.g., "SOL/USDT-P")
-            interval: Candle interval
+            interval: Candle interval (1m, 5m, 15m) - default 5m for HF scalping
             limit: Number of candles
 
         Returns:
@@ -73,10 +81,18 @@ class HibachiDataFetcher:
         """
         await self._initialize_symbols()
 
-        # TODO: Implement when Hibachi SDK has kline endpoint
-        # For now, return None - bot will work with current price only
-        logger.debug(f"Kline data not yet implemented for Hibachi {symbol}")
-        return None
+        # Use Binance proxy for candle data
+        try:
+            klines = await self.binance_proxy.fetch_klines(symbol, interval, limit)
+            if klines is not None and len(klines) > 0:
+                logger.debug(f"✅ Got {len(klines)} {interval} candles for {symbol} via Binance")
+                return klines
+            else:
+                logger.warning(f"No Binance data for {symbol}")
+                return None
+        except Exception as e:
+            logger.error(f"Error fetching Binance klines for {symbol}: {e}")
+            return None
 
     async def fetch_current_price(self, symbol: str) -> Optional[float]:
         """
@@ -102,7 +118,7 @@ class HibachiDataFetcher:
 
     async def fetch_funding_rate(self, symbol: str) -> Optional[float]:
         """
-        Fetch funding rate for a symbol
+        Fetch funding rate for a symbol via Binance proxy
 
         Args:
             symbol: Hibachi symbol (e.g., "SOL/USDT-P")
@@ -110,9 +126,14 @@ class HibachiDataFetcher:
         Returns:
             Funding rate or None
         """
-        # TODO: Implement when Hibachi SDK has funding rate endpoint
-        # For now, return None
-        return None
+        try:
+            funding_data = await self.binance_proxy.fetch_funding_rate(symbol)
+            if funding_data:
+                return funding_data.get('funding_rate')
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching funding rate for {symbol}: {e}")
+            return None
 
     async def fetch_market_data(
         self,

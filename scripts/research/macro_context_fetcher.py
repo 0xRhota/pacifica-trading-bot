@@ -216,8 +216,12 @@ if __name__ == "__main__":
     # Test the fetcher
     logging.basicConfig(level=logging.INFO)
 
+    cambrian_key = os.getenv("CAMBRIAN_API_KEY")
+    if not cambrian_key:
+        raise ValueError("CAMBRIAN_API_KEY environment variable not set")
+
     fetcher = MacroContextFetcher(
-        cambrian_api_key="doug.ZbEScx8M4zlf7kDn",
+        cambrian_api_key=cambrian_key,
         refresh_interval_hours=12
     )
 

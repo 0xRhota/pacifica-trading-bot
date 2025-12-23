@@ -9,7 +9,9 @@ from dotenv import load_dotenv
 
 # Load API key from .env
 load_dotenv()
-API_KEY = os.getenv("CAMBRIAN_API_KEY", "doug.ZbEScx8M4zlf7kDn")
+API_KEY = os.getenv("CAMBRIAN_API_KEY")
+if not API_KEY:
+    raise ValueError("CAMBRIAN_API_KEY environment variable not set")
 BASE_URL = "https://opabinia.cambrian.org"
 
 # Focus tokens

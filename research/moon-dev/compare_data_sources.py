@@ -26,7 +26,9 @@ load_dotenv()
 
 # Cambrian API configuration
 CAMBRIAN_BASE_URL = "https://opabinia.cambrian.network/api/v1"  # Note: .network not .org
-CAMBRIAN_API_KEY = os.getenv("CAMBRIAN_API_KEY", "doug.ZbEScx8M4zlf7kDn")
+CAMBRIAN_API_KEY = os.getenv("CAMBRIAN_API_KEY")
+if not CAMBRIAN_API_KEY:
+    raise ValueError("CAMBRIAN_API_KEY environment variable not set")
 
 # Token address mapping (partial)
 TOKEN_ADDRESSES = {

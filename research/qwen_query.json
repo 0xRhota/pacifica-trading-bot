@@ -1,0 +1,11 @@
+{
+  "model": "qwen/qwen-max",
+  "messages": [
+    {
+      "role": "user",
+      "content": "I need expert analysis on my failing funding rate arbitrage strategy.\n\nSITUATION:\nDelta-neutral funding arb between two perp DEXs. LONG on exchange with LOWER funding, SHORT on exchange with HIGHER funding.\n\nTHE PROBLEM - BLEEDING MONEY:\n- P/L Over 9.5 Hours: Start $133 -> End $116 = -$17 loss (12.7%)\n- Loss rate: $1.77/hour\n\nTrading Activity:\n- CHURN MODE: close/reopen positions every 5 minutes for volume farming\n- 468 orders, 3 assets (BTC/ETH/SOL), ~$43 each position\n- Funding spread: 6-8% annualized\n\nThe Math:\n- Funding settles 3x/day (every 8 hours)\n- Funding income per 8h: ~$0.007 on $129 position\n- But paying fees on EVERY 5-min cycle!\n- Fee cost: $0.50/cycle x 60 cycles = $30\n- Funding earned: $0.01\n- NET: -$30\n\nQUESTIONS:\n1. Is churn mode fundamentally broken for funding arb?\n2. Minimum position size for profitability with 0.05% fees and 6% annualized spread?\n3. Should I just HOLD through funding periods instead of churning?\n4. What would a PROFITABLE strategy look like with $130 capital?\n\nBe brutally honest."
+    }
+  ],
+  "temperature": 0.3,
+  "max_tokens": 2000
+}

@@ -44,7 +44,9 @@ class CambrianDataFetcher:
         Args:
             api_key: Cambrian API key (defaults to env var)
         """
-        self.api_key = api_key or os.getenv("CAMBRIAN_API_KEY", "doug.ZbEScx8M4zlf7kDn")
+        self.api_key = api_key or os.getenv("CAMBRIAN_API_KEY")
+        if not self.api_key:
+            raise ValueError("CAMBRIAN_API_KEY environment variable not set")
         self.headers = {
             "X-API-Key": self.api_key,
             "Content-Type": "application/json"
