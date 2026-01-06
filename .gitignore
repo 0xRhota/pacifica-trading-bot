@@ -83,3 +83,12 @@ TODO.md
 trade-history-*.csv
 .DS_Store
 **/.DS_Store
+
+# Personal/Development configs (don't share)
+.claude/
+.taskmaster/
+.mcp.json
+
+# Wallet/account specific research
+research/*/trade-history-*.csv
+research/pacifica/winning-wallets/
