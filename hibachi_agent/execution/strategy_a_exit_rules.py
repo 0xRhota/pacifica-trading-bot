@@ -1,17 +1,19 @@
 """
-Strategy A Exit Rules - TIME_CAPPED (for Hibachi)
-Based on 2025-11-27 research / Qwen analysis
-Updated 2025-12-08: Qwen v7 recommendations (widen SL, extend max hold)
+Strategy A Exit Rules - PROFIT FOCUSED (for Hibachi)
+Updated 2026-01-06: Pivot from volume to profit-focused longer holds
 
 KEY PARAMETERS:
-- Take Profit: 4%
-- Stop Loss: 2% (widened from 1% - stop hunting protection)
-- Max Hold: 2 HOURS (extended from 1hr - let trades develop)
-- Min Hold: 5 minutes
-- Max Trades/Day: 20
+- Take Profit: 8% (widened from 4% - let winners run)
+- Stop Loss: 4% (widened from 2% - avoid stop hunts in volatility)
+- Max Hold: 48 HOURS (extended from 2hr - allow overnight/multi-day holds)
+- Min Hold: 60 minutes (prevent panic exits)
+- Max Trades/Day: 6 (quality over quantity)
 
-This strategy prioritizes HIGH VOLUME over letting runners run.
-v7 changes: Wider stops to avoid stop-hunting, longer holds to let trends develop
+NEW PHILOSOPHY (2026-01-06):
+- Fees + spread = ~0.25% per trade, so quick trades are mathematically losing
+- High-volume trading DOES NOT WORK on fee-based exchanges
+- Hold positions longer when confident, cut losers after 4h if underwater
+- Bank profits from good holds, then periodically burn them for volume phases
 """
 
 from datetime import datetime, timedelta
@@ -23,22 +25,24 @@ logger = logging.getLogger(__name__)
 
 class StrategyAExitRules:
     """
-    TIME_CAPPED exit strategy - force close after 2 hours.
+    PROFIT FOCUSED exit strategy - hold positions for 24-48 hours.
 
-    Philosophy: Many small trades > few big trades
-    Math: 20 trades/day × 25% win rate × 4:1 R/R = +3% daily
+    Philosophy: Quality trades with bigger targets > many small trades
+    Math: 6 trades/day × 40% win rate × 2:1 R/R = sustainable profit
 
-    v7 Update (2025-12-08): Widened SL to -2%, extended hold to 2hr
-    Based on Qwen analysis: stop-hunting causing early exits on good setups
+    v8 Update (2026-01-06): Pivot from volume to profit
+    - High-volume trading loses to fees + spread (~0.25% round-trip)
+    - Longer holds let winners develop, justify the fee drag
+    - Bank profits, then periodically burn for volume when needed
     """
 
-    # Strategy constants
-    STRATEGY_NAME = "STRATEGY_A_TIME_CAPPED"
-    TAKE_PROFIT_PCT = 4.0      # +4% exit
-    STOP_LOSS_PCT = 2.0        # -2% exit (widened from 1% - v7)
-    MAX_HOLD_HOURS = 2.0       # 2 hour max (extended from 1hr - v7)
-    MIN_HOLD_MINUTES = 5.0     # 5 min minimum
-    MAX_TRADES_PER_DAY = 20
+    # Strategy constants - PROFIT FOCUSED
+    STRATEGY_NAME = "STRATEGY_A_PROFIT_FOCUS"
+    TAKE_PROFIT_PCT = 8.0      # +8% exit (let winners run)
+    STOP_LOSS_PCT = 4.0        # -4% exit (wider to avoid stop hunts)
+    MAX_HOLD_HOURS = 48.0      # 48 hour max (allow overnight/multi-day)
+    MIN_HOLD_MINUTES = 60.0    # 60 min minimum (prevent panic exits)
+    MAX_TRADES_PER_DAY = 6     # Quality over quantity
 
     def __init__(self):
         """Initialize Strategy A exit rules"""
@@ -147,7 +151,19 @@ class StrategyAExitRules:
             return True, f"STOP LOSS: {pnl_pct:.2f}%"
 
         # ═══════════════════════════════════════════════════════════════
-        # RULE 3: TIME EXIT (1 HOUR MAX) - THE KEY DIFFERENTIATOR
+        # RULE 3: CUT LOSER EARLY (4 hours if underwater)
+        # ═══════════════════════════════════════════════════════════════
+        if hold_hours >= 4.0 and pnl_pct < 0:
+            logger.info("=" * 50)
+            logger.info(f"✂️  [STRATEGY-A] CUT LOSER")
+            logger.info(f"   Symbol: {symbol} ({side})")
+            logger.info(f"   Hold time: {hold_hours:.2f}h >= 4h AND losing")
+            logger.info(f"   P/L: {pnl_pct:+.2f}%")
+            logger.info("=" * 50)
+            return True, f"CUT LOSER: {hold_hours:.2f}h underwater (P/L: {pnl_pct:+.2f}%)"
+
+        # ═══════════════════════════════════════════════════════════════
+        # RULE 4: TIME EXIT (48 HOUR MAX)
         # ═══════════════════════════════════════════════════════════════
         if hold_hours >= self.MAX_HOLD_HOURS:
             logger.info("=" * 50)
@@ -159,7 +175,7 @@ class StrategyAExitRules:
             return True, f"TIME EXIT: {hold_hours:.2f}h (P/L: {pnl_pct:+.2f}%)"
 
         # ═══════════════════════════════════════════════════════════════
-        # RULE 4: TREND REVERSAL (optional early exit)
+        # RULE 5: TREND REVERSAL (optional early exit - only if losing)
         # ═══════════════════════════════════════════════════════════════
         if market_data:
             rsi = market_data.get('rsi', 50)

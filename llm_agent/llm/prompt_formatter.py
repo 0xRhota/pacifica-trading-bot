@@ -183,7 +183,10 @@ class PromptFormatter:
         recently_closed_symbols: Optional[List[str]] = None,
         account_balance: Optional[float] = None,
         hourly_review: Optional[str] = None,  # Hourly deep research review
-        dex_name: Optional[str] = None  # DEX name for platform-specific guidance
+        dex_name: Optional[str] = None,  # DEX name for platform-specific guidance
+        learning_context: Optional[str] = None,  # Self-learning insights from past trades
+        sentiment_context: Optional[str] = None,  # Market sentiment from Fear&Greed, funding, etc.
+        shared_learning_context: Optional[str] = None  # Cross-bot learning insights
     ) -> str:
         """
         Format complete trading prompt for LLM
@@ -291,7 +294,28 @@ class PromptFormatter:
             sections.append("=" * 80)
             sections.append("")
 
-        # Section 10: Strategy guidance (DEX-specific or from file)
+        # Section 10: Self-Learning Insights (if provided)
+        if learning_context:
+            sections.append(learning_context)
+            sections.append("")
+            sections.append("⚠️ USE THESE INSIGHTS: Favor symbols with good win rates, avoid poor performers.")
+            sections.append("")
+
+        # Section 10b: Market Sentiment Context (Fear & Greed, Funding, etc.)
+        if sentiment_context:
+            sections.append("=" * 80)
+            sections.append(sentiment_context)
+            sections.append("=" * 80)
+            sections.append("")
+
+        # Section 10c: Cross-Bot Learning Insights (shared between Hibachi and Extended)
+        if shared_learning_context:
+            sections.append("=" * 80)
+            sections.append(shared_learning_context)
+            sections.append("=" * 80)
+            sections.append("")
+
+        # Section 11: Strategy guidance (DEX-specific or from file)
         # If strategy file was loaded, use that instead of default DEX guidance
         if self._strategy_content:
             sections.append(self._strategy_content)
@@ -530,6 +554,90 @@ REASON: [Explain WHY this confidence level - what signals are aligned?]
 ═══════════════════════════════════════════════════════════════════════════
 """
             sections.append(hibachi_guidance)
+            sections.append("")
+
+        # Paradex-specific high-volume strategy (ZERO FEES!)
+        if dex_name == "Paradex":
+            paradex_guidance = """
+═══════════════════════════════════════════════════════════════════════════
+🚀 PARADEX HIGH-VOLUME STRATEGY - ZERO FEES = TRADE AGGRESSIVELY
+═══════════════════════════════════════════════════════════════════════════
+
+**⚡ ZERO FEES - THIS CHANGES EVERYTHING:**
+
+Paradex has ZERO trading fees. No maker/taker fees. Nothing.
+- Round-trip cost = ONLY the spread (0.01%-0.05% on ETH/BTC/SOL)
+- You can make 100 trades and pay NOTHING in fees
+- Volume = Rewards (Paradex incentive program)
+
+**YOUR MISSION: MAXIMUM VOLUME + POSITIVE EXPECTANCY**
+
+Trade FREQUENTLY. Trade AGGRESSIVELY. Every trade with positive EV is worth taking.
+Don't wait for "perfect" setups - good setups are GOOD ENOUGH when fees are zero.
+
+**ENTRY THRESHOLDS (AGGRESSIVE):**
+
+**FOR LONGS** (Any 2 of these = TRADE):
+- RSI < 45 (not oversold, just leaning bullish)
+- MACD positive or turning positive
+- Orderbook imbalance > +0.15 (more bids)
+- Price above SMA or bouncing off support
+
+**FOR SHORTS** (Any 2 of these = TRADE):
+- RSI > 55 (not overbought, just leaning bearish)
+- MACD negative or turning negative
+- Orderbook imbalance < -0.15 (more asks)
+- Price below SMA or rejecting resistance
+
+**SYMBOL PRIORITY (Tightest Spreads):**
+1. ETH, BTC, SOL - Spreads 0.01%-0.02% = BEST for volume
+2. Major alts (LINK, AVAX, etc.) - Spreads 0.02%-0.05% = GOOD
+3. Skip wide spread symbols (>0.2%) - slippage kills edge
+
+**POSITION MANAGEMENT:**
+
+- Max positions: 10 (more action = more volume)
+- Position size: $10 per trade
+- Hold time: 5-30 minutes typically
+- Quick exits: +0.5% profit or -0.3% loss = CLOSE and RE-ENTER
+- Don't hold losers hoping - cut fast, find next trade
+
+**HIGH VOLUME TACTICS:**
+
+1. **SCALP BOTH DIRECTIONS** - Long ETH, short BTC simultaneously if setups exist
+2. **QUICK ROTATIONS** - Close +0.5% winner, immediately find next setup
+3. **USE ALL CAPITAL** - 10 positions of $10 = $100 working at all times
+4. **SPREAD MATTERS MORE THAN FEES** - Prioritize ETH/BTC/SOL for tight spreads
+
+**CONFIDENCE = POSITION COUNT (Not size):**
+
+- Confidence 0.6+ = Take the trade (1 position)
+- Confidence 0.8+ = Consider 2 positions in same direction
+- ANY setup with 0.5+ confidence = Worth taking (fees are ZERO)
+
+**WHAT TO AVOID:**
+
+❌ Sitting in cash "waiting for perfect setup" (volume = rewards!)
+❌ Holding positions for hours hoping for +5% (take +0.5%, find next trade)
+❌ Wide spread symbols (>0.2%) - slippage kills your edge
+❌ Being too selective - good setups are everywhere, TRADE THEM
+
+**YOUR EDGE:**
+
+Zero fees means every tiny edge is pure profit. A +0.1% average per trade
+across 100 trades/day = +10% daily. VOLUME IS YOUR FRIEND.
+
+**RESPONSE FORMAT:**
+
+TOKEN: <SYMBOL>
+DECISION: [BUY <SYMBOL> | SELL <SYMBOL> | CLOSE <SYMBOL>]
+CONFIDENCE: [0.5-1.0] ← Lower threshold because fees are ZERO
+REASON: [Brief - what 2 signals triggered this trade]
+
+MAKE MULTIPLE DECISIONS. Open 5-10 positions if setups exist.
+═══════════════════════════════════════════════════════════════════════════
+"""
+            sections.append(paradex_guidance)
             sections.append("")
 
         # Instructions

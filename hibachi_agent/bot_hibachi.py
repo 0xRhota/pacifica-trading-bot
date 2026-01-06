@@ -31,9 +31,13 @@ from hibachi_agent.execution.hard_exit_rules import HardExitRules
 from hibachi_agent.execution.strategy_a_exit_rules import StrategyAExitRules
 from hibachi_agent.execution.fast_exit_monitor import FastExitMonitor
 from hibachi_agent.execution.strategy_f_self_improving import StrategyFSelfImproving
+from hibachi_agent.execution.strategy_d_pairs_trade import StrategyDPairsTrade
+from hibachi_agent.execution.strategy_g_low_liq_hunter import StrategyGLowLiqHunter
 from hibachi_agent.data.hibachi_aggregator import HibachiMarketDataAggregator
 from hibachi_agent.data.whale_signal import WhaleSignalFetcher
 from utils.cambrian_risk_engine import CambrianRiskEngine
+from llm_agent.data.sentiment_fetcher import SentimentFetcher
+from llm_agent.shared_learning import SharedLearning
 
 # Load environment variables from project root
 project_root_env = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
@@ -176,10 +180,66 @@ class HibachiTradingBot:
         # Initialize Whale Signal Fetcher (0x023a - $28M proven trader)
         self.whale_signal = WhaleSignalFetcher()
 
-        # Initialize Strategy F: Self-Improving LLM (if selected)
+        # Initialize Sentiment Fetcher (Fear & Greed, funding rates)
+        self.sentiment_fetcher = SentimentFetcher()
+        logger.info("📊 Sentiment Fetcher initialized (Fear & Greed + funding)")
+
+        # Initialize Shared Learning (cross-bot insights with Extended)
+        self.shared_learning = SharedLearning(bot_name="hibachi")
+        logger.info("🧠 Shared Learning initialized (cross-bot insights)")
+
+        # Initialize strategies
         self.strategy = strategy
         self.strategy_f = None
-        if strategy.upper() == "F":
+        self.strategy_g = None  # Strategy G: Low-Liq Hunter
+        self.pairs_strategy = None  # Strategy D: Pairs trade
+
+        if strategy.upper() == "G":
+            # Strategy G: Low-Liquidity Momentum Hunter
+            self.strategy_g = StrategyGLowLiqHunter(
+                position_size=position_size,
+                max_positions=max_positions,
+                max_hold_minutes=120,  # 2 hours (Qwen recommendation)
+                stop_loss_pct=-2.0,    # -2% stop
+                take_profit_pct=3.0,   # +3% target
+                trailing_trigger_pct=1.5,  # Trail after +1.5%
+                trailing_stop_pct=0.75,    # Trail at 0.75% behind
+                rolling_window=25      # 25 trades for learning
+            )
+            logger.info("")
+            logger.info("=" * 70)
+            logger.info("🎯 STRATEGY G: LOW-LIQUIDITY MOMENTUM HUNTER")
+            logger.info("=" * 70)
+            logger.info(f"  Targets: Low-liq pairs (HYPE, PUMP, VIRTUAL, ENA, etc.)")
+            logger.info(f"  Avoiding: BTC, ETH, SOL (too efficient)")
+            logger.info(f"  Exits: -2% SL, +3% TP, +1.5% trailing trigger")
+            logger.info(f"  Max Hold: 2 hours")
+            logger.info(f"  Self-Learning: 25-trade rolling window")
+            logger.info(f"  Daily Loss Limit: -$20")
+            logger.info("=" * 70)
+            logger.info("")
+        elif strategy.upper() == "D":
+            # Strategy D: Delta neutral pairs trade (Long ETH, Short BTC)
+            self.pairs_strategy = StrategyDPairsTrade(
+                position_size_usd=position_size,
+                hold_time_seconds=3600,  # 1 hour
+                long_asset="ETH/USDT-P",
+                short_asset="BTC/USDT-P",
+                llm_agent=self.llm_agent  # LLM decides which asset to long based on relative strength
+            )
+            logger.info("")
+            logger.info("=" * 70)
+            logger.info("STRATEGY D: PAIRS TRADE (SELF-LEARNING)")
+            logger.info("=" * 70)
+            logger.info(f"  Assets: ETH/USDT-P vs BTC/USDT-P")
+            logger.info(f"  Size:   ${position_size} per leg (${position_size * 2} total)")
+            logger.info(f"  Hold:   60 minutes")
+            logger.info("")
+            logger.info("  LLM decides which to LONG based on relative strength")
+            logger.info("  Always hedged: Long one, Short the other")
+            logger.info("=" * 70)
+            logger.info("")
+        elif strategy.upper() == "F":
             self.strategy_f = StrategyFSelfImproving(
                 position_size=position_size,
                 review_interval=10,  # Review every 10 trades
@@ -357,11 +417,22 @@ class HibachiTradingBot:
                 }
 
                 # Check if should force close
-                should_close, reason = self.hard_exit_rules.check_should_force_close(
-                    position_for_rules,
-                    market_data,
-                    tracker_data
-                )
+                # Strategy G has its own exit rules
+                if self.strategy_g:
+                    entry_time = datetime.fromisoformat(tracker_data.get('timestamp', datetime.now().isoformat())) if tracker_data else datetime.now()
+                    should_close, reason, pnl_pct_strat = self.strategy_g.check_exit(
+                        symbol=symbol,
+                        entry_price=entry_price,
+                        current_price=current_price,
+                        entry_time=entry_time,
+                        side=side.lower()
+                    )
+                else:
+                    should_close, reason = self.hard_exit_rules.check_should_force_close(
+                        position_for_rules,
+                        market_data,
+                        tracker_data
+                    )
 
                 if should_close:
                     forced_closes.append((symbol, reason, pnl_pct))
@@ -389,6 +460,18 @@ class HibachiTradingBot:
                                 pnl_usd=pnl_usd
                             )
 
+                        # STRATEGY G: Record trade result for self-learning
+                        if self.strategy_g:
+                            pnl_usd = close_result.get('pnl', 0)
+                            # Get signals that triggered entry from tracker
+                            signals_used = tracker_data.get('signals_used', []) if tracker_data else []
+                            self.strategy_g.record_trade_result(
+                                symbol=symbol,
+                                side=side.lower(),
+                                pnl=pnl_usd,
+                                signals_used=signals_used
+                            )
+
                         # Remove from open_positions list
                         open_positions = [p for p in open_positions if p.get('symbol') != symbol]
                     else:
@@ -408,6 +491,76 @@ class HibachiTradingBot:
             if not account_balance:
                 account_balance = 0.0
             logger.info(f"💰 Account balance: ${account_balance:.2f}")
+
+            # ═══════════════════════════════════════════════════════════════
+            # STRATEGY D: PAIRS TRADE (delta neutral - Long ETH, Short BTC)
+            # ═══════════════════════════════════════════════════════════════
+            if self.strategy.upper() == "D" and self.pairs_strategy:
+                logger.info("")
+                logger.info("=" * 70)
+                logger.info("STRATEGY D: PAIRS TRADE CYCLE")
+                logger.info("=" * 70)
+
+                # Check for orphaned positions (one leg missing from pair)
+                orphan_symbol = self.pairs_strategy.sync_with_positions(open_positions)
+                if orphan_symbol:
+                    logger.warning(f"🧹 Closing orphaned position: {orphan_symbol}")
+                    close_decision = {
+                        "action": "CLOSE",
+                        "symbol": orphan_symbol,
+                        "reasoning": "Orphaned position - other leg missing from pair"
+                    }
+                    result = await self.executor.execute_decision(close_decision)
+                    if result.get('success'):
+                        logger.info(f"   ✅ Closed orphan {orphan_symbol}")
+                    else:
+                        logger.error(f"   ❌ Failed to close orphan: {result.get('error')}")
+
+                # Check if we should close existing pair (hold time elapsed)
+                elif await self.pairs_strategy.should_close_pair():
+                    logger.info("⏰ Hold time elapsed - closing pair")
+                    close_decisions = await self.pairs_strategy.get_close_decisions()
+
+                    for decision in close_decisions:
+                        result = await self.executor.execute_decision(decision)
+                        if result.get('success'):
+                            pnl = result.get('pnl', 0)
+                            price = result.get('price', 0)
+                            self.pairs_strategy.record_exit(decision['symbol'], price, pnl)
+                            logger.info(f"   ✅ Closed {decision['symbol']}")
+                        else:
+                            logger.error(f"   ❌ Failed to close {decision['symbol']}: {result.get('error')}")
+
+                # Check if we should open new pair
+                elif await self.pairs_strategy.should_open_pair(open_positions):
+                    logger.info("📈 Opening new pairs trade")
+                    open_decisions = await self.pairs_strategy.get_open_decisions(account_balance, market_data_dict)
+
+                    for decision in open_decisions:
+                        result = await self.executor.execute_decision(decision)
+                        if result.get('success'):
+                            price = result.get('price', 0)
+                            size = result.get('size', 0)
+                            self.pairs_strategy.record_entry(decision['symbol'], price, size)
+                            logger.info(f"   ✅ Opened {decision['action']} {decision['symbol']} @ ${price:.2f}")
+                        else:
+                            logger.error(f"   ❌ Failed to open {decision['symbol']}: {result.get('error')}")
+
+                else:
+                    # Waiting for hold period
+                    remaining = self.pairs_strategy.get_time_remaining()
+                    if remaining:
+                        logger.info(f"   ⏳ Pair active - {remaining/60:.1f} min remaining until close")
+                    else:
+                        logger.info("   No active pair and conditions not met for new pair")
+
+                status = self.pairs_strategy.get_status()
+                logger.info(f"   📊 Stats: {status['stats']['total_trades']} trades, ${status['stats']['total_pnl']:.2f} PnL")
+                logger.info("")
+                logger.info("=" * 70)
+                logger.info("STRATEGY D CYCLE COMPLETE")
+                logger.info("=" * 70)
+                return  # Skip LLM decision for pairs strategy
 
             # Get trade history
             trade_history = ""
@@ -510,6 +663,31 @@ class HibachiTradingBot:
             except Exception as e:
                 logger.warning(f"[WHALE] Could not fetch whale signal: {e}")
 
+            # ═══════════════════════════════════════════════════════════════
+            # SENTIMENT DATA - Fear & Greed, funding rates (2026-01-06)
+            # ═══════════════════════════════════════════════════════════════
+            sentiment_context = ""
+            try:
+                sentiment_data = await self.sentiment_fetcher.fetch_all()
+                if sentiment_data:
+                    sentiment_context = self.sentiment_fetcher.get_prompt_context(sentiment_data)
+                    # Update shared learning with latest sentiment
+                    self.shared_learning.update_sentiment(sentiment_data)
+                    logger.info(f"[SENTIMENT] Fear & Greed: {sentiment_data.get('fear_greed', {}).get('value', 'N/A')} | Combined: {sentiment_data.get('combined_score', 'N/A')}")
+            except Exception as e:
+                logger.warning(f"[SENTIMENT] Could not fetch sentiment: {e}")
+
+            # ═══════════════════════════════════════════════════════════════
+            # SHARED LEARNING - Cross-bot insights (Hibachi <-> Extended)
+            # ═══════════════════════════════════════════════════════════════
+            shared_learning_context = ""
+            try:
+                shared_learning_context = self.shared_learning.get_prompt_context()
+                if shared_learning_context:
+                    logger.info("[SHARED] Cross-bot learning context added to LLM prompt")
+            except Exception as e:
+                logger.warning(f"[SHARED] Could not fetch shared learning: {e}")
+
             # Build kwargs based on prompt version
             prompt_kwargs = {
                 "market_table": market_table,
@@ -519,7 +697,9 @@ class HibachiTradingBot:
                 "trade_history": trade_history + risk_context + whale_context,  # Append risk + whale data
                 "recently_closed_symbols": recently_closed or [],
                 "dex_name": "Hibachi",
-                "analyzed_tokens": hibachi_symbols
+                "analyzed_tokens": hibachi_symbols,
+                "sentiment_context": sentiment_context,  # Fear & Greed, funding rates
+                "shared_learning_context": shared_learning_context  # Cross-bot insights
             }
 
             # HIBACHI v7: Enable Deep42 directional bias (4h cache)
@@ -542,6 +722,15 @@ class HibachiTradingBot:
                     prompt_kwargs["trade_history"] += strategy_context
                     logger.info("🧠 Strategy F: Added performance context to LLM prompt")
                 logger.info("⚡ Hibachi v8: Self-Improving LLM + Deep42 + whale signal")
+            # ═══════════════════════════════════════════════════════════════
+            # STRATEGY G: Low-Liquidity Hunter - Add context to prompt
+            # ═══════════════════════════════════════════════════════════════
+            elif self.strategy_g:
+                strategy_context = self.strategy_g.get_prompt_context()
+                if strategy_context:
+                    prompt_kwargs["trade_history"] += "\n\n" + strategy_context
+                    logger.info("🎯 Strategy G: Added low-liq hunter context to LLM prompt")
+                logger.info("🎯 Hibachi v9: Low-Liquidity Momentum Hunter + Self-Learning")
             else:
                 logger.info("⚡ Hibachi v7: Using Deep42 bias + whale signal + technicals")
 
@@ -837,9 +1026,12 @@ class HibachiTradingBot:
 
         cycle_count = 0
 
-        # Start fast exit monitor as background task
-        self.fast_exit_task = asyncio.create_task(self.fast_exit_monitor.run())
-        logger.info("⚡ Fast exit monitor started (30s price checks)")
+        # Start fast exit monitor as background task (skip for pairs strategies)
+        if self.strategy.upper() != "D":
+            self.fast_exit_task = asyncio.create_task(self.fast_exit_monitor.run())
+            logger.info("⚡ Fast exit monitor started (30s price checks)")
+        else:
+            logger.info("⏸️  Fast exit monitor disabled for pairs strategy")
 
         try:
             while True:
@@ -879,9 +1071,9 @@ def main():
     parser.add_argument('--model', type=str, default='qwen-max',
                         choices=['deepseek-chat', 'qwen-max'],
                         help='LLM model to use (default: qwen-max = Alpha Arena winner)')
-    parser.add_argument('--strategy', type=str, default='F',
-                        choices=['F', 'legacy'],
-                        help='Strategy to use: F=Self-Improving LLM (default), legacy=hardcoded filters')
+    parser.add_argument('--strategy', type=str, default='G',
+                        choices=['D', 'F', 'G', 'legacy'],
+                        help='Strategy: D=Pairs trade, F=Self-Improving, G=Low-Liq Hunter (default), legacy=hardcoded')
 
     args = parser.parse_args()
 

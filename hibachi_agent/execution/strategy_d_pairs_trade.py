@@ -3,14 +3,12 @@ Strategy D - Pairs Trade (for Extended)
 Volume generation while staying flat.
 
 PHILOSOPHY:
-Open opposing positions on correlated assets (ETH vs SOL).
+Open opposing positions on correlated assets (ETH vs BTC).
 Hold for 1 hour, close both. Correlation means ~50% win rate = near break-even.
 Goal: Generate volume without bleeding money.
 
-NOTE: Using SOL as hedge instead of BTC, so bot can still long BTC independently.
-
 PAIRS TRADE MECHANICS:
-1. Long ETH-USD, Short SOL-USD (equal $ amounts)
+1. Long ETH/USDT-P, Short BTC/USDT-P (equal $ amounts)
 2. Hold for 1 hour
 3. Close both positions
 4. Log actual PnL from each trade
@@ -40,8 +38,9 @@ class StrategyDPairsTrade:
 
     STRATEGY_NAME = "STRATEGY_D_PAIRS_TRADE"
 
-    # Default available assets - LLM picks dynamically from these
-    DEFAULT_ASSETS = ["BTC-USD", "ETH-USD", "SOL-USD"]
+    # Default pair: Long ETH, Short BTC
+    LONG_ASSET = "ETH/USDT-P"
+    SHORT_ASSET = "BTC/USDT-P"
 
     # Hold time in seconds (1 hour)
     HOLD_TIME_SECONDS = 3600
@@ -50,8 +49,9 @@ class StrategyDPairsTrade:
         self,
         position_size_usd: float = 100.0,
         hold_time_seconds: int = 3600,
-        available_assets: List[str] = None,  # All assets LLM can choose from
-        llm_agent = None  # LLM agent for dynamic pair selection
+        long_asset: str = "ETH/USDT-P",
+        short_asset: str = "BTC/USDT-P",
+        llm_agent = None  # LLM agent for dynamic direction selection
     ):
         """
         Initialize Pairs Trade Strategy
@@ -59,17 +59,15 @@ class StrategyDPairsTrade:
         Args:
             position_size_usd: Dollar amount per leg (total exposure = 2x this)
             hold_time_seconds: How long to hold before closing (default: 1 hour)
-            available_assets: List of assets LLM can choose from (default: BTC, ETH, SOL)
-            llm_agent: LLM agent for analyzing which assets to long/short
+            long_asset: Asset to go long (default, can be swapped by LLM)
+            short_asset: Asset to go short (default, can be swapped by LLM)
+            llm_agent: LLM agent for analyzing which asset to long/short
         """
         self.position_size_usd = position_size_usd
         self.hold_time_seconds = hold_time_seconds
-        self.available_assets = available_assets or self.DEFAULT_ASSETS
+        self.ASSET_A = long_asset  # Default first asset
+        self.ASSET_B = short_asset  # Default second asset
         self.llm_agent = llm_agent
-
-        # For backwards compat - set initial defaults (LLM will override)
-        self.LONG_ASSET = self.available_assets[0] if self.available_assets else "ETH-USD"
-        self.SHORT_ASSET = self.available_assets[1] if len(self.available_assets) > 1 else "SOL-USD"
 
         # Track active pairs trade
         self.active_trade = None  # Will store {open_time, long_entry, short_entry, ...}
@@ -91,8 +89,8 @@ class StrategyDPairsTrade:
 
         logger.info("=" * 60)
         logger.info("STRATEGY D: PAIRS TRADE (DYNAMIC)")
-        logger.info(f"  Available: {', '.join(self.available_assets)}")
-        logger.info(f"  Direction: LLM picks best pair dynamically")
+        logger.info(f"  Assets: {self.ASSET_A} vs {self.ASSET_B}")
+        logger.info(f"  Direction: LLM selects based on relative strength")
         logger.info(f"  Size: ${self.position_size_usd} per leg")
         logger.info(f"  Hold: {self.hold_time_seconds}s ({self.hold_time_seconds/60:.0f} min)")
         logger.info(f"  Stats: {self.stats['total_trades']} trades, ${self.stats['total_pnl']:.2f} PnL")
@@ -135,39 +133,39 @@ class StrategyDPairsTrade:
         Returns:
             Symbol of orphaned position if found, None otherwise
         """
-        # Find which of our available assets have positions
-        positioned_assets = []
-        for p in our_positions:
-            symbol = p.get('symbol')
-            if symbol in self.available_assets:
-                positioned_assets.append(symbol)
+        # Check for either asset in positions
+        asset_a_pos = any(p.get('symbol') == self.ASSET_A for p in our_positions)
+        asset_b_pos = any(p.get('symbol') == self.ASSET_B for p in our_positions)
 
-        # Exactly 2 legs present - we have an active pair
-        if len(positioned_assets) == 2:
+        # Both legs present - we're good
+        if asset_a_pos and asset_b_pos:
             if self.active_trade is None:
                 # Positions exist but we're not tracking - restore tracking
                 logger.warning(f"[PAIRS] Found both legs but no active_trade - syncing")
                 self.active_trade = {
                     "open_time": datetime.now(),  # Best guess
-                    "long_asset": positioned_assets[0],  # Can't know direction
-                    "short_asset": positioned_assets[1],
+                    "long_asset": self.ASSET_A,  # Can't know direction, assume A is long
+                    "short_asset": self.ASSET_B,
                     "status": "active"
                 }
             return None
 
-        # No positions in our assets - clear tracking
-        if len(positioned_assets) == 0:
+        # Neither leg present - clear tracking
+        if not asset_a_pos and not asset_b_pos:
             if self.active_trade is not None:
                 logger.warning(f"[PAIRS] No positions but have active_trade - clearing")
                 self.active_trade = None
             return None
 
         # One leg orphaned - need to close it
-        if len(positioned_assets) == 1:
-            orphan = positioned_assets[0]
-            logger.warning(f"[PAIRS] ORPHANED: {orphan} (other leg missing)")
+        if asset_a_pos:
+            logger.warning(f"[PAIRS] ORPHANED: {self.ASSET_A} (other leg missing)")
             self.active_trade = None
-            return orphan
+            return self.ASSET_A
+        if asset_b_pos:
+            logger.warning(f"[PAIRS] ORPHANED: {self.ASSET_B} (other leg missing)")
+            self.active_trade = None
+            return self.ASSET_B
 
         return None
 
@@ -191,10 +189,10 @@ class StrategyDPairsTrade:
         if self.active_trade is not None:
             return False
 
-        # Don't open if we have any positions in our available assets
+        # Don't open if we have any positions in our target assets
         for pos in our_positions:
             symbol = pos.get('symbol', '')
-            if symbol in self.available_assets:
+            if symbol in [self.ASSET_A, self.ASSET_B]:
                 logger.info(f"[PAIRS] Already have position in {symbol}, skipping")
                 return False
 
@@ -232,44 +230,39 @@ class StrategyDPairsTrade:
 
     async def _ask_llm_direction(self, market_data_dict: Dict) -> Tuple[str, str, str]:
         """
-        Ask LLM which pair to trade from ALL available assets
+        Ask LLM which asset is more likely to go UP
 
         Args:
-            market_data_dict: Market data for all assets
+            market_data_dict: Market data for both assets
 
         Returns:
             (long_symbol, short_symbol, reasoning)
         """
         if not self.llm_agent:
-            # No LLM - use first two assets
-            return (self.LONG_ASSET, self.SHORT_ASSET, "No LLM - using default pair")
+            # No LLM - default to Long ASSET_A, Short ASSET_B
+            return (self.ASSET_A, self.ASSET_B, "No LLM - using default direction")
 
-        # Build comparison prompt with ALL available assets
-        assets_info = []
-        for asset in self.available_assets:
-            data = market_data_dict.get(asset, {})
-            assets_info.append(f"""{asset}:
-  Price: ${data.get('price', 0):.2f}
-  RSI: {data.get('rsi', 0):.1f}
-  MACD: {data.get('macd', 0):.4f}
-  24h Change: {data.get('price_change_24h', 0):.2f}%
-  Volume: ${data.get('volume_24h', 0):,.0f}""")
+        # Build simple comparison prompt
+        asset_a_data = market_data_dict.get(self.ASSET_A, {})
+        asset_b_data = market_data_dict.get(self.ASSET_B, {})
 
-        assets_list = "\n\n".join(assets_info)
-        valid_symbols = ", ".join(self.available_assets)
+        prompt = f"""You are comparing TWO assets for a pairs trade. You will LONG the stronger one and SHORT the weaker one.
 
-        prompt = f"""You are selecting a PAIRS TRADE. Pick TWO assets: one to LONG (expect UP) and one to SHORT (expect DOWN or underperform).
+ASSET A: {self.ASSET_A}
+  Price: ${asset_a_data.get('price', 0):.2f}
+  RSI: {asset_a_data.get('rsi', 0):.1f}
+  MACD: {asset_a_data.get('macd', 0):.4f}
+  24h Change: {asset_a_data.get('price_change_24h', 0):.2f}%
+  Volume: ${asset_a_data.get('volume_24h', 0):,.0f}
 
-AVAILABLE ASSETS:
-{assets_list}
+ASSET B: {self.ASSET_B}
+  Price: ${asset_b_data.get('price', 0):.2f}
+  RSI: {asset_b_data.get('rsi', 0):.1f}
+  MACD: {asset_b_data.get('macd', 0):.4f}
+  24h Change: {asset_b_data.get('price_change_24h', 0):.2f}%
+  Volume: ${asset_b_data.get('volume_24h', 0):,.0f}
 
-Pick the BEST pair to trade. Consider:
-- Relative strength (long the stronger, short the weaker)
-- RSI divergence
-- Momentum differences
-- Correlation (both should move together so net risk is hedged)
-
-VALID SYMBOLS: {valid_symbols}
+Which asset is MORE LIKELY TO GO UP in the next 1 hour?
 
 Respond ONLY with:
 LONG: <symbol>
@@ -277,9 +270,9 @@ SHORT: <symbol>
 REASON: <one sentence why>
 
 Example:
-LONG: ETH-USD
-SHORT: SOL-USD
-REASON: ETH showing stronger RSI recovery while SOL momentum fading
+LONG: ETH/USDT-P
+SHORT: BTC/USDT-P
+REASON: ETH showing stronger RSI recovery and positive MACD divergence
 """
 
         try:
@@ -287,7 +280,7 @@ REASON: ETH showing stronger RSI recovery while SOL momentum fading
             result = self.llm_agent.model_client.query(prompt)
             if not result or not result.get('content'):
                 logger.warning("[PAIRS-LLM] Empty response from LLM")
-                return (self.LONG_ASSET, self.SHORT_ASSET, "LLM empty response - using default")
+                return (self.ASSET_A, self.ASSET_B, "LLM empty response - using default")
             text = result['content'].strip()
 
             # Parse response
@@ -303,19 +296,19 @@ REASON: ETH showing stronger RSI recovery while SOL momentum fading
                 elif line.startswith('REASON:'):
                     reason = line.replace('REASON:', '').strip()
 
-            # Validate response - must be from available assets
-            if long_symbol in self.available_assets and short_symbol in self.available_assets:
+            # Validate response
+            if long_symbol in [self.ASSET_A, self.ASSET_B] and short_symbol in [self.ASSET_A, self.ASSET_B]:
                 if long_symbol != short_symbol:
-                    logger.info(f"[PAIRS-LLM] LONG {long_symbol} / SHORT {short_symbol}: {reason}")
+                    logger.info(f"[PAIRS-LLM] {long_symbol} > {short_symbol}: {reason}")
                     return (long_symbol, short_symbol, reason)
 
             # Fallback if LLM response invalid
             logger.warning(f"[PAIRS-LLM] Invalid response: {text[:100]}")
-            return (self.LONG_ASSET, self.SHORT_ASSET, "LLM failed - using default")
+            return (self.ASSET_A, self.ASSET_B, "LLM failed - using default")
 
         except Exception as e:
             logger.error(f"[PAIRS-LLM] Error: {e}")
-            return (self.LONG_ASSET, self.SHORT_ASSET, f"LLM error - using default")
+            return (self.ASSET_A, self.ASSET_B, f"LLM error - using default")
 
     async def get_open_decisions(self, account_balance: float, market_data_dict: Dict = None) -> List[Dict]:
         """
@@ -361,14 +354,14 @@ REASON: ETH showing stronger RSI recovery while SOL momentum fading
                 "action": "LONG",
                 "symbol": long_symbol,
                 "reasoning": f"PAIRS TRADE: {reasoning}",
-                "confidence": 0.6,
+                "confidence": 0.8,  # Above 0.7 fee filter threshold
                 "position_size_usd": size_per_leg
             },
             {
                 "action": "SHORT",
                 "symbol": short_symbol,
                 "reasoning": f"PAIRS TRADE: Opposite leg to {long_symbol}",
-                "confidence": 0.6,
+                "confidence": 0.8,  # Above 0.7 fee filter threshold
                 "position_size_usd": size_per_leg
             }
         ]

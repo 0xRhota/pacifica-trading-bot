@@ -1,949 +1,423 @@
-<context>
-# Overview
-Build an LLM-powered trading agent for Pacifica DEX that mirrors the Alpha Arena winning strategy. The core insight: **macro context is encoded in quantitative data** - funding rates, OI, volume, RSI, MACD, EMA capture market state at multiple granularities. The LLM decides trading style and execution based on this multi-granularity data, with no manual macro analysis required.
+# HOPIUM AGENTS - Complete Project PRD
 
-**Problem**: Current bot uses hardcoded orderbook imbalance strategy. Need AI-driven decision making that adapts to market conditions.
+**Project Rename**: `pacifica-trading-bot` → `hopium-agents`
+**Purpose**: AI-powered trading agents for perpetual DEXs (Hibachi, Lighter, Extended, Paradex)
+**Audience**: Developers and traders (private sharing with colleagues)
 
-**Solution**: Feed quantitative market state data to DeepSeek (proven +125% winner) and let it decide when/how to trade.
+---
 
-**Target Users**: Internal use for Pacifica perpetuals trading (28 markets: SOL, BTC, ETH, PUMP, XRP, HYPE, DOGE, etc.)
+# PHASE 0: KNOWLEDGE ACQUISITION (EXECUTE FIRST)
 
-# Core Features
+## 0.1 Objective
 
-## 1. Multi-Granularity Market State Aggregator
-**What**: Collects and formats market data at different timeframes (15m, 1H, 4H)
-**Why**: Captures short-term and longer-term trends - LLM needs both
-**How**:
-- Fetch OHLCV from Pacifica `/kline` endpoint
-- Calculate technical indicators (SMA20, SMA50, RSI, MACD, Bollinger Bands) using pandas_ta
-- Fetch token metrics from Cambrian `/token-details` (volume, holders, FDV)
-- Fetch funding rates from Pacifica `/info` endpoint
-- Format as pandas DataFrame → convert to readable text table
+Before ANY restructuring or documentation, Claude must achieve **omniscient understanding** of this entire project:
+- Every trade made
+- Every strategy iterated
+- Every decision logged
+- Every Qwen collaboration
+- Every lesson learned
+- Every bug fixed
 
-## 2. LLM Trading Decision Engine
-**What**: Queries DeepSeek FREQUENTLY (every 5 min) with formatted market data, gets trading decision
-**Why**: Proven +125% returns in Alpha Arena - LLM adapts to market conditions, continuous monitoring builds edge
-**How**:
-- Construct prompt with all 28 markets data (summary table format)
-- Query LLM on schedule (every 5 min default, configurable)
-- LLM ALWAYS responds (even if decision is "NOTHING")
-- Extract decision + reasoning from response
-- Log EVERY decision with timestamp, reasoning, market state
-- Parse response and validate
-- Optional: Swarm consensus (query 6 models, majority vote)
+This knowledge will be documented in `MASTER_ANALYSIS.md` for both humans AND future AI agents.
 
-**Key Point**: LLM is always "watching" markets, making decisions constantly, but patient (mostly "NOTHING")
+## 0.2 Data Sources to Analyze
 
-## 3. Position Execution & Management
-**What**: Executes trades via Pacifica API, monitors positions
-**Why**: Need to act on LLM decisions and manage risk
-**How**:
-- Use existing Pacifica API wrapper for order placement
-- Integrate with existing risk manager (position sizing, stop loss)
-- Track positions with trade_tracker
-- Monitor funding rate changes for position adjustments
+### Trade Logs (Primary Performance Data)
+Location: `logs/trades/`
 
-## 4. Data Quality & Error Handling
-**What**: Validates data, handles API failures gracefully
-**Why**: Bad data = bad decisions. APIs can fail.
-**How**:
-- Retry logic (3 attempts, 10s timeout) on API calls
-- Data validation (check for nulls, outliers, stale data)
-- Fallback to previous good data if fetch fails
-- Log all data issues for review
+**Active Trade Files**:
+- `hibachi.json` - Hibachi DEX trades
+- `lighter.json` - Lighter DEX trades
+- `extended.json` - Extended DEX trades
+- `paradex.json` - Paradex trades
+- Multiple dated archives in `logs/trades/archive/`
 
-# User Experience
+**Analysis Requirements**:
+1. Total trades per exchange
+2. Win rate per exchange, per symbol, per strategy
+3. Average profit/loss per trade
+4. Best performing symbols
+5. Worst performing symbols
+6. Hold time analysis
+7. Time-of-day patterns
+8. Confidence calibration (was 0.8 confidence actually 80% accurate?)
+9. Direction bias (LONG vs SHORT performance)
+10. Strategy evolution impact (did newer strategies improve results?)
 
-**User Persona**: Developer/trader managing Pacifica positions
+### Bot Logs (Operational History)
+Location: `logs/`
 
-**Key User Flows**:
-1. Start bot → Configure check interval → Bot runs autonomously
-2. Watch live log stream → See EVERY decision + reasoning in real-time
-3. Review decisions → Understand why LLM chose each trade or passed
-4. Adjust config if needed → Change check frequency, position size, etc.
+**Key Log Files** (66 total):
+- `strategy_switches.log` - Every strategy change with rationale
+- `hibachi_bot.log`, `lighter_bot.log`, `extended_bot.log` - Active bot logs
+- `grid_mm_live.log` - Grid market making live operations
+- Historical logs with timestamps showing evolution
 
-**UI/UX**: Command-line bot with **continuous readable logging**
+**Analysis Requirements**:
+1. Strategy switch history (what changed when and why)
+2. Error patterns (what breaks most often)
+3. API issues encountered
+4. Order execution patterns
+5. Position sizing evolution
+6. Confidence threshold changes
 
-**Critical: Bot Behavior**:
-- LLM checks markets FREQUENTLY (every 5 min default, configurable to 1-15 min)
-- LLM reads data and makes decision EVERY check (not just when trading)
-- MOST decisions will be "NOTHING" (that's good - patient AI)
-- Simple log output shows EVERY decision + reasoning
-- User can tail log and see AI "thinking" in real-time
+### Qwen Collaboration Logs (AI-to-AI Learning)
+Location: `research/` and `llm_agent/prompts_archive/`
 
-**Log Output Format** (readable by humans):
+**Known Qwen Collaboration Files (18 found)**:
+- `research/qwen_query.json` - Funding rate arbitrage analysis
+- `research/2025-11-27-copy-trading-pivot/qwen_*.json` - Strategy pivot queries
+- `research/2025-11-27-copy-trading-pivot/QWEN_*.md` - Analysis reports
+- `llm_agent/prompts_archive/v9_qwen_enhanced.txt` - Alpha Arena winner strategy
+
+**Analysis Requirements**:
+1. What questions were asked to Qwen?
+2. What insights were gained?
+3. How did Qwen influence strategy development?
+4. What was the Alpha Arena winning approach?
+5. Which Qwen recommendations were implemented vs ignored?
+
+### Strategy Evolution
+Location: `core/strategies/`, `hibachi_agent/execution/`, `llm_agent/`
+
+**Key Strategy Files**:
+- `core/strategies/self_improving_llm.py` - Core self-improving strategy
+- `hibachi_agent/execution/strategy_f_self_improving.py` - Hibachi implementation
+- `llm_agent/self_learning.py` - Self-learning module
+- `logs/strategies/*.json` - Strategy state files
+
+**Analysis Requirements**:
+1. Complete strategy version history (v1 through current)
+2. What changed between versions?
+3. Which changes improved performance?
+4. What patterns were discovered?
+5. Self-learning outcomes and calibration
+
+### Research Documents
+Location: `research/`
+
+**Key Research Files**:
+- `LEARNINGS.md` - Accumulated trading wisdom
+- `GRID_MM_EVOLUTION.md` - Grid MM strategy evolution
+- Bot performance analysis reports
+- Whale wallet analysis
+- Copy trading research
+
+**Analysis Requirements**:
+1. Key learnings documented
+2. Failed experiments and why they failed
+3. Successful patterns discovered
+4. Exchange-specific insights
+5. Fee optimization discoveries
+
+## 0.3 Deliverable: MASTER_ANALYSIS.md
+
+Create a single comprehensive document containing:
+
+### Section 1: Executive Summary (For Traders)
+- Total P&L across all exchanges
+- Best performing strategy
+- Current active strategies
+- Key numbers: win rate, average trade, sharpe ratio
+
+### Section 2: Strategy Evolution Timeline
+- Chronological list of every strategy version
+- What changed, why, and the result
+- Highlight pivotal moments
+
+### Section 3: Exchange-Specific Insights
+- **Hibachi**: Fee structure, best symbols, optimal hold times
+- **Lighter**: Alpha Arena lessons, liquidity patterns
+- **Extended**: Pairs trading learnings
+- **Paradex**: Grid MM results
+
+### Section 4: AI Collaboration History
+- All Qwen consultations and outcomes
+- Claude code generation decisions
+- What worked, what didn't
+
+### Section 5: Technical Learnings
+- API quirks discovered
+- Order execution edge cases
+- Data freshness issues
+- Exchange-specific bugs
+
+### Section 6: Performance Metrics (Complete)
+- Every symbol traded with P&L
+- Win rates by direction, timeframe, confidence level
+- Best/worst trading hours
+- Position sizing analysis
+
+### Section 7: Self-Learning Calibration
+- How accurate were confidence scores?
+- What patterns did self-learning discover?
+- Blocked symbols and why
+
+### Section 8: Failed Experiments (Learn from Mistakes)
+- Strategies that didn't work
+- Why they failed
+- What we learned
+
+### Section 9: For Future AI Agents
+- Structured data for AI consumption
+- Key decision patterns to follow
+- Mistakes to avoid
+- Prompt patterns that worked
+
+---
+
+# PHASE 1: REPOSITORY RESTRUCTURE
+
+## 1.1 Rename Project
+
+**From**: `pacifica-trading-bot`
+**To**: `hopium-agents`
+
+**Files to Update**:
+- All documentation references
+- Package names in Python files
+- Git remote (if applicable)
+
+## 1.2 Target Directory Structure
+
 ```
-[2025-10-29 20:15:00] ========================================
-MARKET SCAN: 28 Pacifica perpetuals
-Decision: NOTHING
-Reason: All markets neutral, RSI mid-range, no strong signals
-Top 3 candidates: SOL (RSI 52), BTC (weak trend), ETH (low volume)
-Open positions: None
-========================================
-
-[2025-10-29 20:20:00] ========================================
-MARKET SCAN: 28 Pacifica perpetuals
-Decision: BUY SOL ✅
-
-LLM Reasoning (concise):
-"Checked Pacifica 15m OHLCV + Cambrian volume data + funding rates. SOL showing
-strong uptrend (SMA20 > SMA50), RSI breaking above 50 (momentum shift), positive
-funding rate (+0.36% = bullish sentiment), and 24h volume spike ($2.3B). Decision:
-BUY SOL for momentum trade."
-
-Signal strength: High (4/5 indicators bullish)
-Entry: $192.40, Size: $30, Stop: $190.47 (-1%), Target: $196.85 (+2.3%)
-Data sources: Pacifica /kline, Cambrian /token-details, Pacifica /info
-Position opened: SOL-LONG-001
-========================================
-
-[2025-10-29 20:25:00] ========================================
-MARKET SCAN: 28 Pacifica perpetuals
-Decision: NOTHING
-Reason: Just entered SOL position, monitoring. BTC overbought (RSI 72), no other setups
-Open positions: SOL-LONG-001 (+1.5%, +$0.45)
-========================================
-
-[2025-10-29 20:30:00] ========================================
-MARKET SCAN: 28 Pacifica perpetuals
-Decision: NOTHING
-Reason: SOL position healthy, profit target approaching. Markets consolidating.
-Open positions: SOL-LONG-001 (+4.0%, +$1.20)
-Next check: Monitor for exit signal
-========================================
-```
-
-**Why This Matters**:
-- User sees AI "thinking" constantly (builds trust)
-- Can spot patterns in why AI passes on trades
-- Clear reasoning for every decision (not black box)
-- Easy to tail log and watch live: `tail -f logs/llm_bot.log`
-- Every decision is logged for later analysis
-</context>
-
-<PRD>
-# Technical Architecture
-
-## Current Repository State & Reorganization Plan
-
-**Current Structure** (mixed organization):
-```
-pacifica-trading-bot/
-├── bots/                     # Multiple bot scripts (live_pacifica.py, vwap_lighter_bot.py)
-├── dexes/                    # DEX SDKs (lighter/, pacifica/)
-├── strategies/               # Strategy classes (base, vwap, long_short)
-├── scripts/                  # Testing scripts (lighter/, general/)
-├── research/                 # Research docs
-├── archive/                  # Deprecated code
-├── logs/                     # Log files
-├── docs/                     # Documentation
-├── config.py                 # Global config
-├── pacifica_bot.py           # API wrapper
-├── risk_manager.py           # Risk management
-├── trade_tracker.py          # Trade tracking
-└── README.md
-```
-
-**Issues with Current Structure**:
-- Multiple bot entry points (confusing)
-- Mixed concerns (strategies, bots, SDKs all at root)
-- Hard to find LLM agent code vs rule-based strategies
-- No clear separation between old bots and new LLM system
-- Archive folder at root (clutters namespace)
-
-**Target Structure** (clean, professional, navigable):
-```
-pacifica-trading-bot/
-├── llm_agent/                # NEW: LLM trading system (clean package)
+hopium-agents/
+├── agents/                       # Exchange-specific agents
+│   ├── hibachi/                  # Hibachi DEX agent
+│   │   ├── __init__.py
+│   │   ├── bot.py               # Main entry point
+│   │   ├── sdk.py               # Hibachi SDK wrapper
+│   │   └── execution/           # Strategy implementations
+│   ├── lighter/                  # Lighter DEX agent
+│   ├── extended/                 # Extended DEX agent
+│   └── paradex/                  # Paradex agent (Grid MM)
+│
+├── core/                         # Shared core modules
 │   ├── __init__.py
-│   ├── data/
-│   │   ├── __init__.py
-│   │   ├── aggregator.py     # Main entry: fetch_all_markets()
-│   │   ├── pacifica.py       # Pacifica API wrapper
-│   │   ├── cambrian.py       # Cambrian API wrapper
-│   │   └── indicators.py     # Technical indicators
-│   ├── agent/
-│   │   ├── __init__.py
-│   │   ├── client.py         # DeepSeek client
-│   │   └── decision.py       # Decision logic
-│   ├── execution/
-│   │   ├── __init__.py
-│   │   ├── executor.py       # Trade execution
-│   │   └── monitor.py        # Position monitoring
-│   ├── config.py             # LLM agent config
-│   └── utils.py              # Helpers
+│   ├── strategies/              # Strategy implementations
+│   │   ├── base_strategy.py
+│   │   ├── self_improving_llm.py
+│   │   └── grid_mm.py
+│   ├── data/                    # Data fetching
+│   │   ├── aggregator.py
+│   │   └── indicators.py
+│   └── risk/                    # Risk management
+│       └── risk_manager.py
 │
-├── legacy/                   # OLD: Rule-based bots (archived but accessible)
-│   ├── bots/                 # live_pacifica.py, vwap_lighter_bot.py
-│   ├── strategies/           # vwap_strategy.py, long_short.py
-│   ├── dexes/                # lighter/, pacifica/ SDKs
-│   ├── scripts/              # Testing scripts
-│   ├── config.py             # Legacy config
-│   ├── pacifica_bot.py       # Legacy API wrapper
-│   ├── risk_manager.py       # Reusable - import from here
-│   └── trade_tracker.py      # Reusable - import from here
+├── llm/                          # LLM integration
+│   ├── __init__.py
+│   ├── client.py                # Model client (OpenRouter, etc)
+│   ├── prompt_formatter.py      # Prompt construction
+│   ├── self_learning.py         # Self-learning module
+│   └── prompts/                 # Prompt templates
 │
-├── docs/                     # Documentation (keep organized)
+├── dexes/                        # Exchange SDK wrappers
+│   ├── hibachi/
+│   ├── lighter/
+│   ├── pacifica/
+│   └── paradex/
+│
+├── scripts/                      # Utility scripts
+│   ├── analyze_performance.py
+│   ├── grid_mm_live.py
+│   └── sync_agent_learnings.py
+│
+├── research/                     # Research and analysis
+│   ├── LEARNINGS.md
+│   ├── GRID_MM_EVOLUTION.md
+│   ├── qwen_collaborations/     # Qwen consultation history
+│   └── analysis/                # Performance analysis
+│
+├── logs/                         # Log files (gitignored)
+│   ├── trades/
+│   ├── strategies/
+│   └── *.log
+│
+├── docs/                         # Documentation
 │   ├── DATA_SOURCES.md
-│   ├── LLM_AGENT_STRATEGY_PLAN.md
-│   └── PROGRESS.md
+│   ├── API_REFERENCE.md
+│   └── QUICK_START.md
 │
-├── logs/                     # All logs
-│   ├── bot_sessions.log      # Session tracking
-│   ├── llm_bot.log          # LLM bot logs
-│   └── legacy/              # Old bot logs
+├── config/                       # Configuration
+│   ├── .env.example             # Template for secrets
+│   ├── config.py                # Global config
+│   └── symbols.py               # Symbol mappings
 │
-├── tests/                    # Unit tests (NEW)
-│   ├── test_data/
-│   ├── test_agent/
-│   └── test_execution/
+├── tests/                        # Unit tests
 │
-├── bot_llm.py               # NEW: Main entry point (simple)
-├── requirements.txt         # Dependencies
-├── .env.example             # Config template
-├── .env                     # Secrets (gitignored)
-├── README.md                # Setup guide
-├── CLAUDE.md                # Dev instructions
-└── PROGRESS.md              # Project tracking
+├── MASTER_ANALYSIS.md           # Omniscient project knowledge
+├── PROGRESS.md                  # Development progress
+├── TODO.md                      # Task list (gitignored)
+├── README.md                    # Project overview
+├── CLAUDE.md                    # AI agent instructions
+├── CONTRIBUTING.md              # For collaborators
+├── ARCHITECTURE.md              # System design
+├── requirements.txt             # Dependencies
+└── .gitignore
 ```
 
-**Reorganization Benefits**:
-1. **Clear separation**: `llm_agent/` (new) vs `legacy/` (old)
-2. **Single entry point**: `bot_llm.py` (obvious where to start)
-3. **Package structure**: `llm_agent` is importable, testable
-4. **Human-readable**: Directory names explain purpose
-5. **Agent-friendly**: Clear hierarchy, consistent naming
-6. **Deployment-ready**: Package can be containerized easily
-7. **Reusability**: Keep `risk_manager` and `trade_tracker` in legacy, import as needed
-
-**Migration Strategy** (Phase 0 - Before Phase 1):
-1. Create `llm_agent/` package structure (empty modules)
-2. Move current bots → `legacy/bots/`
-3. Move strategies → `legacy/strategies/`
-4. Move dexes → `legacy/dexes/`
-5. Move scripts → `legacy/scripts/`
-6. Create `bot_llm.py` entry point (placeholder)
-7. Update `.gitignore` to exclude logs, .env
-8. Create `.env.example` template
-9. Update `README.md` with new structure
-10. Add import paths so legacy code still works
-
-**No Breaking Changes**:
-- Old bots continue working in `legacy/` folder
-- Can run `python legacy/bots/live_pacifica.py` if needed
-- New LLM bot is separate: `python bot_llm.py`
-- Gradual migration, not destructive
-
-## System Components
-
-### 1. Data Layer (`src/data/`)
-- **MarketDataAggregator**: Main class orchestrating data collection
-  - Methods: `fetch_ohlcv()`, `calculate_indicators()`, `fetch_token_metrics()`, `fetch_funding_rates()`
-  - Returns: pandas DataFrame with all market state data
-- **PacificaDataFetcher**: Wrapper for Pacifica API calls
-  - Endpoints: `/kline`, `/info`, `/book`
-  - Retry logic, rate limiting, error handling
-- **CambrianDataFetcher**: Wrapper for Cambrian API calls
-  - Endpoints: `/token-details`, `/ohlcv/token` (as backup)
-  - Includes Deep42 social sentiment (optional)
-- **IndicatorCalculator**: Technical indicator calculations
-  - Uses pandas_ta library
-  - Indicators: SMA (20, 50), RSI (14), MACD (12,26,9), Bollinger Bands (5,2)
-
-### 2. LLM Layer (`src/llm/`)
-- **LLMTradingAgent**: Main agent class
-  - Methods: `format_prompt()`, `query_model()`, `parse_response()`
-  - Supports single model or swarm consensus
-- **ModelClient**: API wrapper for DeepSeek/other LLMs
-  - Handles authentication, retries, rate limits
-  - Validates responses
-- **SwarmConsensus** (optional): Multi-model voting
-  - Query 6 models in parallel (ThreadPoolExecutor)
-  - Aggregate votes, return majority decision
-
-### 3. Execution Layer (`src/execution/`)
-- **TradeExecutor**: Places orders based on LLM decisions
-  - Uses existing `PacificaAPI` wrapper
-  - Integrates with `RiskManager` for position sizing
-  - Integrates with `TradeTracker` for P&L tracking
-- **PositionMonitor**: Tracks open positions, adjusts based on funding/PnL
-  - Checks stop loss, take profit
-  - Monitors funding rate changes
-  - Suggests position adjustments to LLM
-
-### 4. Configuration Layer
-- **Config files**: `.env` for API keys, `config.py` for bot settings
-- **Settings**: Symbols, timeframes, position sizes, stop loss %, take profit %
-- **LLM config**: Model selection, temperature, max tokens
-
-## Data Models
-
-### MarketState (pandas DataFrame)
-```python
-columns = [
-    'timestamp',      # Unix timestamp
-    'symbol',         # SOL, BTC, ETH, etc.
-    'timeframe',      # 15m, 1H, 4H
-    'open', 'high', 'low', 'close', 'volume',  # OHLCV
-    'sma_20', 'sma_50',                        # Moving averages
-    'rsi',                                     # RSI
-    'macd', 'macd_signal', 'macd_hist',       # MACD
-    'bb_upper', 'bb_middle', 'bb_lower',      # Bollinger Bands
-    'funding_rate', 'next_funding_rate',      # Funding
-    'volume_24h', 'holder_count', 'fdv',      # Token metrics
-]
-```
-
-### LLMDecision
-```python
-{
-    'action': 'buy' | 'sell' | 'nothing',
-    'confidence': float (0-1),  # Optional from swarm
-    'reasoning': str,            # Optional if model provides
-    'timestamp': int,
-    'symbol': str,
-    'market_state_snapshot': dict  # For logging
-}
-```
-
-## APIs and Integrations
-
-**External APIs**:
-- Pacifica API: OHLCV, funding rates, orderbook, positions
-- Cambrian API: Token metrics, OHLCV (backup), Deep42 social
-- DeepSeek API: LLM trading decisions
-- Binance Futures API: Open Interest (19 markets, no auth required)
-- HyperLiquid API: Open Interest (26 markets, fallback for Binance gaps)
-
-**Internal Integrations**:
-- Existing `PacificaAPI`, `RiskManager`, `TradeTracker`
-- Existing `config.py` for settings
-- Existing logging infrastructure
-
-## Infrastructure Requirements
-
-**Runtime**:
-- Python 3.11+
-- pandas, pandas_ta for data processing
-- aiohttp for async API calls
-- python-dotenv for config
-
-**APIs Required**:
-- Cambrian API key (have: `doug.ZbEScx8M4zlf7kDn`)
-- DeepSeek API key (need to obtain)
-- Pacifica account (have: 8saejVsbEBraGvxbJGxrosv4QKMfR2i8f59GFAnMXfMc, $136.60 balance)
-
-**Storage**:
-- Local file system for logs
-- In-memory data caching (Redis optional for future)
-
-# Development Roadmap
-
-## Phase 0: Pre-Development Validation (REQUIRED BEFORE PHASE 1)
-**Goal**: Validate all data sources and APIs work as expected before writing code
-**Scope**:
-- Test Pacifica `/info` endpoint - verify returns all 28 markets in single call
-- Test Cambrian batch endpoint (`/token-details-multi`) format and response
-- Install and test pandas_ta library with Python 3.9
-- Create Solana token address mapping table for Pacifica symbols
-- Obtain and test DeepSeek API key (basic completion test)
-- Document all API response formats and limitations
-- Identify which markets lack Cambrian data (BTC, ETH wrapped tokens, etc.)
-
-**Deliverable**: Validation report documenting what works, what doesn't, and workarounds needed
-
-**Why Required**: Prevents architectural rework if APIs don't behave as assumed in PRD
-
-## Phase 1: Basic Data Pipeline (MVP)
-**Goal**: Fetch and format market data for ALL 28 Pacifica perpetuals
-**Scope**:
-- Implement `PacificaDataFetcher` with `/kline` and `/info` endpoints
-- Fetch all available markets from `/info` (28 perpetuals)
-- Implement `CambrianDataFetcher` with `/token-details` endpoint (batch support)
-- Implement `OIDataFetcher` with Binance + HyperLiquid APIs **(NEW)**
-  - Binance Futures API: `https://fapi.binance.com/fapi/v1/openInterest` (19 markets)
-  - HyperLiquid API: `https://api.hyperliquid.xyz/info` (26 markets, batch call)
-  - Coverage: 26/28 markets (92.9%) - missing kBONK, kPEPE
-  - Binance priority, HyperLiquid fallback
-- Implement `MacroContextFetcher` with Deep42 + CoinGecko + Fear & Greed APIs **(NEW)**
-  - Deep42 (Cambrian): AI-powered market analysis, catalysts, outlook
-  - CoinGecko: Global market metrics (market cap change, BTC dominance)
-  - Fear & Greed Index: Sentiment score (0-100)
-  - Cache for 12 hours, refresh automatically
-- Implement `IndicatorCalculator` with `ta` library (NOT `pandas_ta`) (SMA, RSI, MACD, BBands)
-- Implement `MarketDataAggregator.fetch_all_markets()` → returns dict of DataFrames
-- **Add input sanitization layer** - prevent LLM prompt injection
-- Add data validation and error handling
-- Clean, simple file structure ready for deployment
-
-**Deliverable**: Script that fetches ALL Pacifica perpetuals market state (including OI data + macro context), prints summary table
-
-## Phase 2: LLM Integration (Single Model)
-**Goal**: Query DeepSeek continuously with all market data, log EVERY decision + concise reasoning
-**Scope**:
-- Implement `ModelClient` for DeepSeek API with daily spend limit check
-- Implement `LLMTradingAgent.format_prompt()` with THREE sections:
-  1. **Macro Context** (from `MacroContextFetcher`, refreshed every 12 hours)
-  2. **Market Data Table** (all 28 markets with OI, indicators, funding)
-  3. **Open Positions** (symbol, entry price, current P&L, time held)
-- LLM sees ALL 28 markets at once, picks best opportunity
-- **Include macro context in every prompt**: Current market state, upcoming catalysts, short/mid-term outlook
-- Implement `LLMTradingAgent.query_model()` with forced response format
-- Response format: "DECISION: BUY SOL\nREASON: <explanation>" or "DECISION: NOTHING\nREASON: <why passing>"
-- **Response parsing with strict regex**:
-  - Pattern: `^DECISION:\s*(BUY|SELL|NOTHING)\s*([A-Z]+)?\s*$` for decision line
-  - Extract symbol only if present (not for NOTHING)
-  - Case-insensitive, strip whitespace
-  - Reject malformed responses (e.g., "STRONG BUY", "BUY SOL AND SELL ETH")
-- **CRITICAL**: LLM must explain reasoning in format: "Checked [sources], saw [trend], made [decision]"
-  - Example: "Checked Pacifica 15m OHLCV + Cambrian volume + funding. SOL uptrend (SMA20 > SMA50), RSI breaking 50, positive funding. Decision: BUY SOL."
-  - Keep concise (2-3 sentences max), must cite data sources checked
-- Implement `LLMTradingAgent.parse_response()` - extract decision + reasoning
-- **Retry strategy**: Max 2 retries with appended message "Please use EXACT format: DECISION: [BUY <SYMBOL> | SELL <SYMBOL> | NOTHING]"
-- **Retry uses same market data** (don't refetch)
-- Default to "DECISION: NOTHING" with reason "Parse error" if all retries fail
-- Implement readable log formatter - every decision logged with reasoning
-- Add scheduling loop - query every N minutes (configurable)
-- Add simple prompt template (data table + "What's the best trade? Always respond with decision + brief reason citing data sources")
-
-**Deliverable**: Script that continuously monitors all markets, logs every decision with concise reasoning citing data sources, user can watch AI "thinking"
-
-## Phase 3: Trade Execution Integration
-**Goal**: Execute trades based on LLM decisions
-**Scope**:
-- Implement `TradeExecutor.execute_decision()`
-- Integrate with existing `PacificaSDK` (using API Agent Keys), `RiskManager`, `TradeTracker`
-- **Enforce MAX_OPEN_POSITIONS=3 limit** before opening new positions
-- Add position sizing logic based on confidence (if available)
-- **Partial fill handling**:
-  - Check order response for filled amount
-  - If partial fill (filled < requested), log as partial and continue monitoring
-  - Update TradeTracker with actual filled amount, not requested amount
-  - Don't retry partial fills (accept what was filled)
-- Add dry-run mode for testing without real trades
-- Implement session logging to `logs/bot_sessions.log`
-- Use existing 3-level ladder TP system: [2%, 4%, 6%] with sizes [33%, 33%, 34%]
-- Stop loss: 1% (from BotConfig.STOP_LOSS)
-
-**Deliverable**: Bot that makes LLM-based trading decisions and executes them (dry-run mode)
-
-## Phase 4: Social Sentiment Integration (Quick Add After MVP)
-**Goal**: Add Deep42 social sentiment to give LLM market sentiment context
-**Scope**:
-- Integrate Cambrian Deep42 API (`/deep42/agents/deep42`)
-- Fetch sentiment for top 10 tokens by volume (to keep it fast)
-- Add sentiment columns to summary table: Sentiment score, Social volume, Trending status
-- Update prompt to include sentiment data in market overview
-- Keep it simple: Just add 2-3 sentiment columns to existing table
-- Test if sentiment improves win rate vs quantitative-only
-
-**Deliverable**: Bot that shows market sentiment alongside price/technical data
-
-**Why Now**: LLM needs to review market sentiment on choices and options. Keep on ice until MVP proven, then quick add.
-
-## Phase 5: Multi-Timeframe Support (Enhancement)
-**Goal**: Add multiple timeframes for better context
-**Scope**:
-- Extend data fetcher to support multiple timeframes (15m, 1H, 4H)
-- Add timeframe weighting in LLM prompt (recent = more important)
-- Show recent 15m trend + 1H trend + 4H macro trend
-- Keep response simple: still picks ONE best trade from all markets
-
-**Deliverable**: Bot that shows multi-timeframe data for all markets to LLM
-
-## Phase 6: Position Monitoring & Adjustment
-**Goal**: Monitor open positions, adjust based on market changes
-**Scope**:
-- Implement `PositionMonitor.check_positions()`
-- Monitor funding rate changes → suggest position adjustments
-- Monitor PnL → suggest partial closes at profit targets
-- Query LLM for position adjustment decisions (not just entry)
-- Add position-specific prompt context
-
-**Deliverable**: Bot that manages positions dynamically based on LLM feedback
-
-## Phase 7: Swarm Consensus (Optional Enhancement)
-**Goal**: Multi-model voting for higher confidence
-**Scope**:
-- Implement `SwarmConsensus.query_models()` with ThreadPoolExecutor
-- Support 6 models: DeepSeek, Claude, GPT-4, Gemini, Grok, Qwen
-- Implement majority vote aggregation
-- Add confidence scoring based on vote distribution
-- Make swarm vs single-model configurable
-
-**Deliverable**: Bot with optional swarm mode for critical decisions
-
-## Phase 8: Performance Monitoring & Optimization
-**Goal**: Track performance, identify improvements
-**Scope**:
-- Add performance metrics (win rate, avg profit, Sharpe ratio)
-- Log each decision with outcome for analysis
-- Implement A/B testing framework (different prompts, models, data inputs)
-- Add backtesting capability (replay historical data)
-- Optimize data fetching (caching, rate limits)
-
-**Deliverable**: Analytics dashboard showing bot performance
-
-## Phase 9: Production Hardening
-**Goal**: Make bot production-ready
-**Scope**:
-- Add comprehensive error recovery (API failures, network issues)
-- Implement graceful shutdown (close positions, save state)
-- Add health checks and monitoring
-- Improve logging (structured logs, log rotation)
-- Add configuration validation on startup
-- Security audit (API key handling, input validation)
-
-**Deliverable**: Production-ready bot with 99.9% uptime
-
-# Logical Dependency Chain
-
-**Foundation (Must Build First)**:
-1. Data fetchers (Pacifica, Cambrian) → No LLM without data
-2. Indicator calculator → LLM needs processed data, not raw OHLCV
-3. Data aggregator → Orchestrates all data sources
-
-**Core Functionality**:
-4. LLM client → Can't make decisions without this
-5. Prompt formatter → LLM needs properly formatted input
-6. Response parser → Must validate LLM output
-
-**Execution**:
-7. Trade executor → Need to act on decisions
-8. Risk manager integration → Must size positions safely
-9. Position monitor → Need to manage existing trades
-
-**Scaling**:
-10. Multi-symbol support → Scale to more markets
-11. Multi-timeframe support → Better context for LLM
-12. Swarm consensus → Optional enhancement for confidence
-
-**Production**:
-13. Error handling → Must be robust
-14. Monitoring/logging → Need visibility
-15. Performance tracking → Need to measure success
-
-**Quick Path to Usable Front End**:
-- Phase 1 → Can see data being fetched (visual confirmation)
-- Phase 2 → Can see LLM decisions (shows it's "thinking")
-- Phase 3 dry-run → Can see trade execution without risk
-- Phase 3 live → Real trading with small positions
-
-# Risks and Mitigations
-
-## Technical Challenges
-
-**Risk**: API rate limits (Pacifica, Cambrian, DeepSeek)
-**Mitigation**:
-- Implement request caching (don't refetch same data)
-- Add rate limit tracking and backoff
-- Use multiple API keys if available
-- Fetch data less frequently (5-15 min intervals, not every second)
-
-**Risk**: LLM response parsing failures (unexpected format, hallucinations)
-**Mitigation**:
-- Force simple 3-word response format
-- Validate response before execution
-- Retry with clearer prompt if invalid
-- Fallback to "Do Nothing" if parsing fails
-- Log all invalid responses for review
-
-**Risk**: Data quality issues (stale data, missing values, outliers)
-**Mitigation**:
-- **API response timestamp validation**: Reject API responses older than 5 minutes (checks when data was fetched)
-- **Candle timestamp validation**: Verify most recent candle is within expected timeframe (for 15m candles, last candle should be within last 20 minutes)
-- Null/NaN checks on all fields
-- Outlier detection (flag prices outside 3σ from recent average)
-- Keep previous good data as fallback
-- Log all data quality issues
-
-**Risk**: Network failures (API downtime, timeout)
-**Mitigation**:
-- Retry logic (3 attempts, exponential backoff)
-- Timeout protection (10s max per request)
-- Graceful degradation (use cached data)
-- Multiple data sources (Cambrian + Binance for funding)
-- Don't trade if data is unavailable
-
-## MVP Definition
-
-**Core MVP** (Phases 1-3):
-- Fetch market data for ALL 28 Pacifica perpetuals (OHLCV, indicators, funding, token metrics)
-- Show all markets to DeepSeek in single prompt (summary table format)
-- LLM picks best opportunity from all 28 markets
-- Execute decision in dry-run mode
-- Structured logging of decisions
-- Simple file structure easy to run locally: `python bot_llm.py`
-
-**Quick Add After MVP** (Phase 4):
-- Deep42 social sentiment (top 10 tokens) - LLM needs to review market sentiment on choices
-
-**What's NOT in MVP**:
-- Multiple timeframes (start with 15m only)
-- Swarm consensus (single model first)
-- Position monitoring (just entry trades)
-- Backtesting (live testing only)
-- Performance analytics (manual review of logs)
-
-**Success Criteria for MVP**:
-- Bot runs for 24 hours without crashing
-- Queries LLM every 5 minutes = 288 checks per day
-- Logs EVERY decision (expect 250+ "NOTHING" + 5-10 trades)
-- Makes at least 3 trading decisions across different symbols
-- Data fetching works reliably for all 28 markets (>95% success rate)
-- LLM responses parse correctly (>90% success rate)
-- Dry-run executions log properly
-- User can `tail -f logs/llm_bot.log` and see AI thinking in real-time
-- Log is human-readable (not JSON dumps)
-- Simple one-command deployment: `python bot_llm.py --dry-run`
-
-## Resource Constraints
-
-**API Costs**:
-- DeepSeek: ~$0.14 per 1M input tokens, $0.70 per 1M output tokens
-- Estimate: $5-10/month for single-model, $30-50/month for swarm
-- Cambrian: Free tier sufficient for testing
-- Pacifica: No API costs, just trading fees
-
-**Development Time**:
-- Phase 1 (Data pipeline): 2-3 days
-- Phase 2 (LLM integration): 1-2 days
-- Phase 3 (Execution): 1 day
-- MVP total: ~5 days with testing
-
-**Maintenance**:
-- Monitor API changes (Pacifica, Cambrian)
-- Update prompts based on performance
-- Retrain/adjust if market regime changes
-
-# Appendix
-
-## Data Sources - What We're Pulling & Known Issues
-
-### Pacifica API (Primary Source)
-
-**Endpoint: `/kline`** - OHLCV Candles
-- **What we pull**: Open, High, Low, Close, Volume for 15m intervals
-- **For**: All 28 perpetuals (SOL, BTC, ETH, PUMP, XRP, HYPE, DOGE, etc.)
-- **Frequency**: Every 5 minutes (fetch last 72 bars = 3 days of 15m candles)
-- **Issues**:
-  - Requires `start_time` parameter (milliseconds) - can't just get "last N bars"
-  - Need to calculate start_time = now - (72 * 15 * 60 * 1000)
-- **Status**: ✅ Tested, working reliably
-- **Data freshness**: Real-time, <1 second latency
-
-**Endpoint: `/info`** - Market Info + Funding Rates
-- **What we pull**:
-  - Current funding rate (% annualized)
-  - Next funding rate (prediction)
-  - Max leverage, lot size, tick size
-  - Min/max order sizes
-- **For**: All 28 perpetuals in single API call
-- **Frequency**: Every 5 minutes (same as kline fetch)
-- **Issues**: None - very clean endpoint
-- **Status**: ✅ Tested, working
-- **Data freshness**: Updates every 8 hours (typical funding rate schedule)
-
-**Endpoint: `/book`** - Orderbook (Optional)
-- **What we pull**: Bid/ask depth for real-time spread
-- **For**: Individual symbols (not batch)
-- **Frequency**: Could fetch, but not MVP requirement
-- **Issues**: Single symbol per call (not batch)
-- **Status**: ✅ Tested, but not using in MVP
-
-### Cambrian API (Secondary Source)
-
-**Endpoint: `/solana/token-details`** - Token Metrics
-- **What we pull**:
-  - 24h volume (USD)
-  - Holder count
-  - FDV (fully diluted valuation)
-  - Buy/sell volume split (24h)
-  - Price (as backup/validation)
-- **For**: Solana tokens (SOL, BONK, etc.) - need to map Pacifica symbols to Solana addresses
-- **Frequency**: Every 5 minutes
-- **Issues**:
-  - **Token address mapping required**: SOL = `So11111111111111111111111111111111111111112`
-  - **Not all Pacifica markets are Solana tokens** (BTC, ETH are wrapped, PUMP/HYPE may not exist on Solana)
-  - **Batch endpoint exists** (`/token-details-multi`) but need comma-separated addresses
-  - **May not have data for all 28 Pacifica markets**
-- **Status**: ✅ Tested for SOL, need to map other tokens
-- **Data freshness**: Real-time, updated every few minutes
-- **Workaround**: For tokens without Cambrian data, skip token metrics (rely on Pacifica OHLCV only)
-
-**Endpoint: `/solana/ohlcv/token`** - OHLCV (Backup)
-- **What we pull**: Backup OHLCV if Pacifica fails
-- **For**: Solana tokens only
-- **Frequency**: Only if Pacifica fails
-- **Issues**: Same token mapping issue as above
-- **Status**: ✅ Tested, but backup only
-
-**Endpoint: `/deep42/agents/deep42`** - Social Sentiment (Phase 4 - Quick Add)
-- **What we pull**: AI-analyzed trending tokens, social buzz, sentiment scores
-- **For**: Top 10 tokens by volume (to keep it fast)
-- **Frequency**: Every 5 minutes (same as other data)
-- **Issues**: Expensive (10-15s per query) - only fetch top 10 to mitigate
-- **Status**: ✅ Tested, ready to integrate right after MVP proven
-- **Why**: LLM needs to review market sentiment on choices and options
-
-### Technical Indicator Calculations (Local)
-
-**Source**: pandas_ta library (no API calls)
-- **What we calculate**:
-  - SMA20, SMA50 (moving averages)
-  - RSI (14-period)
-  - MACD (12,26,9)
-  - Bollinger Bands (5,2)
-- **For**: All symbols with OHLCV data
-- **Frequency**: Calculated on every fetch (no caching)
-- **Issues**: None - deterministic calculations
-- **Status**: ✅ Library available, need to implement wrapper
-
-### Data Flow & Dependencies
-
-```
-Every 5 minutes:
-
-1. Fetch Pacifica /info → Get all 28 markets + funding rates
-   └─ Issues: None
-
-2. For each symbol in markets:
-   a. Fetch Pacifica /kline → OHLCV (15m, 72 bars)
-      └─ Issues: Need to calculate start_time
-
-   b. Try fetch Cambrian /token-details → Token metrics
-      └─ Issues: May not exist for all symbols
-      └─ Fallback: Skip token metrics, use OHLCV only
-
-   c. Calculate indicators locally → RSI, MACD, etc.
-      └─ Issues: None
-
-3. Aggregate all data → Single DataFrame per symbol
-   └─ Issues: Handle missing Cambrian data gracefully
-
-4. Format all 28 symbols → Summary table for LLM
-   └─ Issues: None
-
-5. Query LLM → Get decision + reasoning
-   └─ Issues: API rate limits, parse errors
-
-6. Log decision → Human-readable format
-   └─ Issues: None
-```
-
-### Known Data Gaps & Mitigations
-
-**Gap 1: Not all Pacifica symbols have Solana token addresses**
-- **Affected**: BTC, ETH (wrapped), possibly PUMP, FARTCOIN, HYPE
-- **Mitigation**:
-  - Hardcode known mappings (BTC = wrapped BTC address)
-  - For unmapped tokens, skip Cambrian data
-  - LLM still gets OHLCV + indicators + funding (plenty of data)
-- **Impact**: Low - OHLCV is primary signal
-
-**Gap 2: Cambrian API may rate limit**
-- **Affected**: Batch fetching 28 token details every 5 min
-- **Mitigation**:
-  - Use batch endpoint (`/token-details-multi`) for efficiency
-  - Add retry logic with backoff
-  - Cache data for 5 min (don't refetch within same interval)
-- **Impact**: Low - can degrade to OHLCV-only if Cambrian fails
-
-**Gap 3: Pacifica kline requires start_time calculation**
-- **Affected**: All OHLCV fetches
-- **Mitigation**:
-  - Calculate: `start_time_ms = int((now - timedelta(days=3)).timestamp() * 1000)`
-  - Validate timestamp before API call
-- **Impact**: Low - straightforward calculation
-
-**Gap 4: Funding rates update slowly (every 8 hours)**
-- **Affected**: Funding rate signal may be stale
-- **Mitigation**:
-  - Show both current + next funding rate
-  - LLM can see if funding is changing direction
-- **Impact**: None - this is normal for funding rates
-
-### API Cost Estimate (MVP)
-
-**Per 5-minute cycle**:
-- Pacifica /info: 1 call (free)
-- Pacifica /kline: 28 calls (free)
-- Cambrian /token-details-multi: 1 call (free tier: 1000/day)
-- DeepSeek query: 1 call (~$0.0001 per query)
-
-**Daily totals** (288 cycles):
-- Pacifica: 8,352 calls (free)
-- Cambrian: 288 calls (well under 1000/day limit)
-- DeepSeek: 288 queries (~$0.03/day = $1/month)
-
-**Status**: All within free/cheap tiers
-
-## Research Findings
-
-**Alpha Arena Results** (Oct 2025):
-- DeepSeek: +125% (winner)
-- Others: -59% to +22% (losing)
-- Key: Quantitative data encoding macro context
-
-**Moon Dev Architecture** (Reverse Engineered):
-- Uses HyperLiquid, Aster, Solana APIs
-- Fetches 1H OHLCV, 72 bars (3 days)
-- Calculates SMA20, SMA50, RSI, MACD, BBands
-- Formats as DataFrame.to_string() → ASCII table
-- Queries 6 models in parallel (45-60s total)
-- Forces simple response: "Buy", "Sell", "Do Nothing"
-- Majority vote wins
-
-**Data Sources Confirmed**:
-- Pacifica `/kline`: OHLCV for 28 markets (tested ✅)
-- Pacifica `/info`: Funding rates for all markets (tested ✅)
-- Binance Futures `/openInterest`: Open Interest for 19 markets (tested ✅)
-- HyperLiquid `/info`: Open Interest for 26 markets (tested ✅, fallback source)
-- Cambrian `/token-details`: Volume, holders, FDV (tested ✅)
-- Cambrian Deep42: Social sentiment (tested ✅, optional)
-
-**Open Interest Coverage**: 26/28 markets (92.9%) - missing kBONK, kPEPE
+## 1.3 File Migration Plan
+
+### Move Operations:
+1. `hibachi_agent/` → `agents/hibachi/`
+2. `lighter_agent/` → `agents/lighter/`
+3. `extended_agent/` → `agents/extended/`
+4. `paradex_agent/` → `agents/paradex/`
+5. `llm_agent/` → `llm/`
+6. `core/strategies/` → `core/strategies/` (keep)
+7. Research Qwen files → `research/qwen_collaborations/`
+
+### Create New:
+1. `config/` directory with templates
+2. `docs/QUICK_START.md`
+3. `CONTRIBUTING.md`
+4. `MASTER_ANALYSIS.md` (from Phase 0)
+
+### Update:
+1. All import paths in Python files
+2. README.md with new structure
+3. CLAUDE.md with updated instructions
+4. ARCHITECTURE.md with current design
+
+---
+
+# PHASE 2: DOCUMENTATION OVERHAUL
+
+## 2.1 README.md (Complete Rewrite)
+
+**Target Sections**:
+1. Project tagline and description
+2. Quick start (3 commands to run)
+3. Active bots and their strategies
+4. Performance highlights
+5. Architecture overview (with diagram)
+6. Configuration guide
+7. Exchange setup instructions
+8. Contributing guidelines
+
+**Tone**: Professional but accessible to both devs and traders
+
+## 2.2 CLAUDE.md (AI Agent Instructions)
+
+**Must Include**:
+1. Project context and mission
+2. Directory structure explained
+3. Key files and their purposes
+4. Development conventions
+5. How to consult Qwen for external perspective
+6. What NOT to do (learned from mistakes)
+7. Current active strategies
+8. Testing requirements
+
+## 2.3 CONTRIBUTING.md
+
+**For Colleagues**:
+1. Development setup
+2. Code style guide
+3. PR process
+4. How to add a new exchange
+5. How to add a new strategy
+6. Testing requirements
+
+## 2.4 QUICK_START.md
+
+**Fast Onboarding**:
+1. Prerequisites (Python, API keys)
+2. Installation (3 steps)
+3. Configure .env
+4. Run your first bot
+5. Check logs
+
+---
+
+# PHASE 3: CONFIGURATION TEMPLATES
+
+## 3.1 .env.example
+
+Create comprehensive template with:
+- All required API keys (with descriptions)
+- All optional settings
+- Exchange-specific credentials
+- LLM configuration (OpenRouter, model selection)
+- Risk parameters
+
+## 3.2 Config Separation
+
+**config/user_config.py**: User-editable settings
+- Position sizes
+- Risk tolerance
+- Symbol blacklists
+- Timeframes
+
+**config/core_config.py**: System settings
+- API endpoints
+- Retry logic
+- Log rotation
+
+---
+
+# PHASE 4: VALIDATION & CLEANUP
+
+## 4.1 Code Cleanup
+- Remove dead code
+- Fix TODO comments
+- Standardize naming
+- Add type hints to public functions
+
+## 4.2 Test All Bots
+- Verify each agent starts
+- Check log output is correct
+- Validate trade tracking works
+
+## 4.3 Git Cleanup
+- Update .gitignore
+- Remove any committed secrets
+- Clean git history if needed
+
+---
+
+# SUCCESS CRITERIA
+
+1. **Knowledge Complete**: MASTER_ANALYSIS.md covers 100% of project history
+2. **Structure Clean**: All files in logical locations
+3. **Docs Updated**: README, CLAUDE.md, CONTRIBUTING.md complete
+4. **Bots Work**: All agents start and run correctly
+5. **Shareable**: Colleague can clone and understand in &lt;30 min
+6. **AI-Ready**: Future Claude sessions can work effectively
+
+---
+
+# APPENDIX: Original PRD Content
+
+(Keeping original technical architecture below for reference)
+
+---
+
+## Original LLM Agent Architecture
 
 **Core Philosophy** (Jay A, Alpha Arena):
 > "There is macro context encoded in quantitative data. We feed them funding rates, OI, volume, RSI, MACD, EMA, etc to capture 'state' of market at different granularities. They decide the 'style' of trading."
 
-## Technical Specifications
+### Data Sources
+- Pacifica API: OHLCV, funding rates, orderbook
+- Cambrian API: Token metrics, Deep42 sentiment
+- Binance/HyperLiquid: Open Interest
+- Technical indicators: RSI, MACD, SMA, Bollinger Bands
 
-**Timeframes**:
-- Primary: 15m (real-time responsiveness)
-- Secondary: 1H (trend context)
-- Tertiary: 4H (macro trend) - optional
+### LLM Integration
+- OpenRouter for model access
+- Qwen models for analysis and strategy
+- Response parsing with validation
+- Confidence-based position sizing
 
-**Indicators**:
-- SMA: 20-period (short-term trend), 50-period (longer-term trend)
-- RSI: 14-period (overbought/oversold)
-- MACD: 12,26,9 (momentum)
-- Bollinger Bands: 5,2 (volatility)
+### Risk Management
+- Max open positions limit
+- Position sizing based on confidence
+- Stop loss (1-2%) and take profit (2-6%)
+- Exchange-specific fee optimization
 
-**Prompt Structure** (simplified for all markets):
-```
-PACIFICA PERPETUALS MARKET SNAPSHOT (28 markets, 15m timeframe)
-Timestamp: 2025-10-29 20:15:00 UTC
-
-| Symbol | Price | 24h Vol | Funding | RSI | MACD | Trend | Volatility |
-|--------|-------|---------|---------|-----|------|-------|------------|
-| SOL    | $192.40 | $2.3B | +0.36% | 45.2 | +0.12 | UP    | Medium |
-| BTC    | $109k   | $45B  | +0.01% | 62.1 | +0.45 | UP    | Low |
-| ETH    | $3890   | $12B  | -0.03% | 38.4 | -0.23 | DOWN  | Medium |
-| PUMP   | $0.45   | $120M | +1.25% | 78.9 | +2.11 | UP    | High |
-| ... (24 more rows)
-
-Current open positions: None (or list positions)
-
-Based on this market snapshot, what is the best trading action right now?
-
-Respond in this EXACT format:
-DECISION: [BUY <SYMBOL> | SELL <SYMBOL> | NOTHING]
-REASON: [Brief explanation of why - 1-2 sentences max]
-
-Examples:
-DECISION: BUY SOL
-REASON: Strong uptrend with RSI breaking above 50, positive funding rate, and volume spike indicates momentum.
-
-DECISION: NOTHING
-REASON: All markets neutral or choppy, no clear edge. SOL overbought, BTC weak volume, ETH consolidating.
-
-DECISION: SELL ETH
-REASON: Negative funding rate with bearish MACD divergence and RSI below 40 suggests continued downside.
-```
-
-**Response Validation**:
-- Must match pattern: "DECISION: [action]\nREASON: [text]"
-- Extract decision line and reason line separately
-- Parse decision: "BUY <SYMBOL>", "SELL <SYMBOL>", or "NOTHING"
-- Extract reasoning text (1-2 sentences)
-- Validate symbol exists in Pacifica markets
-- Case-insensitive matching
-- Strip whitespace
-- Retry if invalid (max 2 retries with clearer prompt)
-- Default to "NOTHING" with reason "Parse error" if all retries fail
-- Log raw LLM response if parsing fails (for debugging)
-
-**Error Codes**:
-- `DATA_FETCH_ERROR`: API call failed
-- `DATA_VALIDATION_ERROR`: Data quality issue
-- `LLM_TIMEOUT`: Model took >30s
-- `LLM_PARSE_ERROR`: Response format invalid
-- `EXECUTION_ERROR`: Trade placement failed
-
-## Integration Points
-
-**Existing Code to Use**:
-- `pacifica_bot.py`: PacificaAPI wrapper (API calls)
-- `risk_manager.py`: Position sizing, risk checks
-- `trade_tracker.py`: P&L tracking, trade history
-- `config.py`: Configuration management
-- `strategies/base_strategy.py`: Strategy interface
-
-**New Code Structure** (Simple, Deployable):
-```
-llm_agent/                    # Clean package structure
-├── __init__.py
-├── data/
-│   ├── __init__.py
-│   ├── aggregator.py         # fetch_all_markets() - main entry point
-│   ├── pacifica.py           # Pacifica API calls (kline, info)
-│   ├── cambrian.py           # Cambrian API calls (token-details)
-│   └── indicators.py         # pandas_ta wrapper
-├── agent/
-│   ├── __init__.py
-│   ├── client.py             # DeepSeek API client
-│   └── decision.py           # LLM decision logic
-├── execution/
-│   ├── __init__.py
-│   ├── executor.py           # Place trades
-│   └── monitor.py            # Track positions
-├── config.py                 # All settings in one place
-└── utils.py                  # Validation, caching
-
-bot_llm.py                    # Main entry point - simple runner script
-tests/                        # Unit tests
-requirements.txt              # Dependencies
-.env.example                  # Config template
-README.md                     # Setup & deployment docs
-```
-
-**Config Example** (`.env`):
-```
-# APIs
-CAMBRIAN_API_KEY=doug.ZbEScx8M4zlf7kDn
-DEEPSEEK_API_KEY=<added_to_.env>  # Free credits available for testing
-
-# Bot Settings
-DATA_TIMEFRAME=15m
-CHECK_INTERVAL=300  # 5 minutes (how often to query LLM)
-POSITION_SIZE_USD=30
-STOP_LOSS_PCT=1.0
-TAKE_PROFIT_LEVELS=[0.02, 0.04, 0.06]  # 3-level ladder: 2%, 4%, 6%
-TAKE_PROFIT_SIZES=[0.33, 0.33, 0.34]   # Exit 1/3 at each level
-MAX_OPEN_POSITIONS=3  # Limit concurrent positions
-
-# LLM Settings
-LLM_MODEL=deepseek-chat
-LLM_TEMPERATURE=0.1
-LLM_MAX_TOKENS=50  # Enough for "BUY SOL"
-LLM_DAILY_SPEND_LIMIT=10.0  # Max $10/day spend limit
-USE_SWARM=false
-
-# Deployment
-DRY_RUN=true  # Set to false for live trading
-LOG_LEVEL=INFO
-```
-
-**Simple Deployment**:
-```bash
-# Local testing
-python bot_llm.py --dry-run
-
-# Production
-python bot_llm.py  # Reads DRY_RUN from .env
-
-# Background
-nohup python bot_llm.py > logs/llm_bot.log 2>&1 &
-```
-</PRD>
+### Self-Learning System
+- Track win/loss by symbol, direction, confidence
+- Auto-block poor performers
+- Confidence calibration
+- Cross-agent learning (dual-agent architecture)

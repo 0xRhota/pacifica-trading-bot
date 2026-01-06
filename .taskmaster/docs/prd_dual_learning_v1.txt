@@ -1,0 +1,389 @@
+# PRD: Dual-Bot Learning Strategy & Paradex Fix
+Version: 1.0
+Date: 2026-01-06
+Status: Active Development
+
+---
+
+## Executive Summary
+
+Two parallel efforts to improve trading performance:
+
+1. **Hibachi + Extended Dual Learning**: Shared insights between bots, pivot from high-volume to profit-focused longer holds
+2. **Paradex Grid MM Fix**: Investigate and fix systematic small losses
+
+---
+
+## Part 1: Dual-Bot Learning Strategy
+
+### Problem Statement
+
+Current state (as of 2026-01-06):
+- Hibachi bot "bleeding out all day" - consistent small losses
+- High-volume trading on fee-based exchanges (Hibachi: 0.035%, Extended: 0.05%) is mathematically losing
+- Spread slippage compounds losses: ~0.1-0.2% per trade on top of fees
+- **Total round-trip cost: ~0.25-0.35%** (fees + spread)
+- At 25% win rate with 4% TP / 2% SL, this is a losing formula
+
+**Key Insight**: Accidental overnight hold was profitable. Quick trades are losing to fees/spread.
+
+### Proposed Solution
+
+#### 1.1 Pivot Strategy: Profit Over Volume
+
+**OLD APPROACH** (High Volume):
+- Quick 2-hour max holds
+- 4% TP / 2% SL
+- 10+ trades per day per bot
+- Goal: Generate exchange volume for potential rewards
+
+**NEW APPROACH** (Profit Focus):
+- Hold positions 24-48 hours when confident
+- Wider targets: 8-10% TP / 4% SL
+- 1-3 trades per day per bot
+- Goal: Actual P&L positive
+
+**Trade-off**: Build profit reserves, then periodically "burn" them on high-volume phases to maintain exchange activity.
+
+#### 1.2 Shared Learning Between Hibachi & Extended
+
+**Current State**: Both bots operate independently with no shared context.
+
+**Proposed Architecture**:
+
+```
+┌─────────────────┐         ┌─────────────────┐
+│   Hibachi Bot   │         │  Extended Bot   │
+│   (Hibachi DEX) │         │  (Extended DEX) │
+└────────┬────────┘         └────────┬────────┘
+         │                           │
+         ▼                           ▼
+┌─────────────────────────────────────────────┐
+│         Shared Learning Layer               │
+│  logs/shared_insights.json                  │
+│  - Blocked combos (SOL_SHORT, etc)          │
+│  - Daily blackout windows                   │
+│  - Sentiment context                        │
+│  - Win rates by symbol/direction            │
+│  - Active positions (avoid conflicts)       │
+└─────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────┐
+│         Qwen LLM (Hourly Sync)              │
+│  - Reviews both bots' recent trades         │
+│  - Generates cross-bot recommendations      │
+│  - Updates shared filters                   │
+└─────────────────────────────────────────────┘
+```
+
+**Shared Data Structure** (`logs/shared_insights.json`):
+
+```json
+{
+  "last_updated": "2026-01-06T12:00:00Z",
+  "blocked_combos": [
+    {"combo": "SOL_SHORT", "win_rate": 0.25, "sample_size": 20, "expires": "2026-01-08"},
+    {"combo": "ETH_SHORT", "win_rate": 0.28, "sample_size": 18, "expires": "2026-01-08"}
+  ],
+  "blackout_windows_utc": [
+    {"start": "15:00", "end": "17:00", "reason": "Worst loss hours both bots"}
+  ],
+  "sentiment": {
+    "fear_greed_combined": 45,
+    "social_sentiment": "neutral",
+    "updated": "2026-01-06T11:30:00Z"
+  },
+  "active_positions": {
+    "hibachi": [{"symbol": "BTC", "direction": "LONG", "entry_time": "..."}],
+    "extended": []
+  },
+  "confidence_calibration": {
+    "llm_0.8_actual": 0.44,
+    "llm_0.7_actual": 0.45
+  }
+}
+```
+
+**Sync Frequency**: Every hour, both bots:
+1. Write their recent trade outcomes to shared file
+2. Read other bot's outcomes and sentiment data
+3. Query Qwen for cross-bot recommendations (optional, every 6 hours)
+
+#### 1.3 Sentiment Data Sources
+
+**Required Data** (query every 1-6 hours):
+
+| Data Type | Source | API/Method | Update Freq |
+|-----------|--------|------------|-------------|
+| Fear & Greed Index | alternative.me | `https://api.alternative.me/fng/` | 24h |
+| Fear & Greed #2 | CoinMarketCap | CMC widget API | 24h |
+| Crypto Twitter Sentiment | LunarCrush | API (may need key) | 1h |
+| Reddit Sentiment | r/cryptocurrency | Scrape or Pushshift | 1h |
+| BTC Funding Rate | Multiple exchanges | Aggregate | Real-time |
+| Long/Short Ratio | Coinglass | `https://open-api.coinglass.com/` | 5m |
+
+**Combined Sentiment Score**:
+```python
+def calculate_sentiment_score():
+    scores = []
+
+    # Fear & Greed (0-100, <25=extreme fear, >75=extreme greed)
+    fg = fetch_fear_greed()
+    scores.append(fg / 100)  # Normalize to 0-1
+
+    # Long/Short Ratio (>1 = more longs, bullish signal inverse)
+    ls_ratio = fetch_long_short_ratio()
+    scores.append(1 - min(ls_ratio, 2) / 2)  # Inverse, cap at 2
+
+    # Funding Rate (positive = longs pay, bearish contrarian)
+    funding = fetch_aggregate_funding()
+    scores.append(0.5 - funding * 100)  # -0.01% = 0.51, +0.01% = 0.49
+
+    return sum(scores) / len(scores)  # 0-1 score
+```
+
+#### 1.4 Longer Hold Strategy
+
+**Changes to Exit Rules**:
+
+| Parameter | Old Value | New Value | Rationale |
+|-----------|-----------|-----------|-----------|
+| MAX_HOLD_HOURS | 2 | 48 | Allow overnight/multi-day holds |
+| TAKE_PROFIT_PCT | 4% | 8-10% | Larger targets justify fees |
+| STOP_LOSS_PCT | 2% | 4% | Wider stops for volatility |
+| MIN_HOLD_MINUTES | 5 | 60 | Prevent panic exits |
+| CONFIDENCE_FOR_LONG_HOLD | N/A | 0.8+ | Only hold long on high confidence |
+
+**New Exit Logic**:
+```python
+def should_exit(position, current_pnl_pct, hold_hours, confidence):
+    # Hard stops (always apply)
+    if current_pnl_pct <= -4.0:  # Stop loss
+        return True, "STOP_LOSS"
+    if current_pnl_pct >= 10.0:  # Take profit
+        return True, "TAKE_PROFIT"
+
+    # Time-based (soft)
+    if hold_hours >= 48:
+        return True, "MAX_HOLD"
+
+    # Early exit only if losing AND low confidence
+    if hold_hours >= 4 and current_pnl_pct < 0 and confidence < 0.7:
+        return True, "CUT_LOSER"
+
+    # Otherwise HOLD
+    return False, "HOLD"
+```
+
+#### 1.5 Volume Burning Cycles
+
+**Concept**: Accumulate profits during "farm" weeks, then burn them for volume.
+
+**Implementation**:
+```python
+class TradingMode(Enum):
+    PROFIT_FOCUS = "profit"  # Longer holds, fewer trades
+    VOLUME_BURN = "volume"   # Quick trades, accept losses
+
+# In bot config
+if account_profit_since_reset >= 50.0:  # $50 profit banked
+    if user_requested_volume_mode:
+        switch_to_volume_mode(burn_budget=25.0)  # Burn half
+```
+
+---
+
+## Part 2: Paradex Grid MM Investigation & Fix
+
+### Problem Statement
+
+Current behavior:
+- Grid MM bot places orders but rarely fills
+- When fills DO occur, always lose 1-2 cents, never gain
+- Analysis suggests orders placed outside competitive spread
+- But user reports occasional fills that lose, never win
+
+### Deep Investigation Required
+
+#### 2.1 Hypothesis: Spread vs Order Placement
+
+**Initial Analysis**:
+- Market spread: ~0.6-0.7 bps
+- Bot spread: 1.5 bps (configured)
+- Bot orders are placed BEHIND competitive market makers
+
+**But this doesn't explain**: Why losses when we DO get filled?
+
+#### 2.2 Alternative Hypotheses
+
+**Hypothesis A: Adverse Selection**
+- We only get filled when price moves AGAINST us
+- Market makers with faster feeds pick us off
+- Our stale orders become toxic fills
+
+**Hypothesis B: Inventory Imbalance Cost**
+- Existing SHORT position at 98% inventory
+- Can only place BUY orders
+- BUY fills when price dropping (adverse)
+- We're always buying into falling prices
+
+**Hypothesis C: Fee/Rebate Miscalculation**
+- Bot assumes -0.005% maker rebate
+- Actually paying taker fee on some fills?
+- Net effect: small losses per fill
+
+**Hypothesis D: Rounding/Slippage**
+- Order placed at $93,486
+- Fill price slightly worse due to rounding
+- Consistent 1-2 cent slippage
+
+#### 2.3 Investigation Tasks
+
+1. **Log Enhancement**: Add detailed fill price vs order price logging
+2. **Fee Verification**: Check actual fees paid per fill in Paradex account
+3. **Timing Analysis**: When do fills occur? Price direction at fill time?
+4. **Spread Competition**: Compare our quotes to best bid/ask at fill time
+5. **Inventory Analysis**: Track position P&L separate from trading P&L
+
+#### 2.4 Proposed Fixes (After Investigation)
+
+**If Hypothesis A (Adverse Selection)**:
+- Tighten spread to be more competitive
+- Add price momentum filter (pause orders in trends)
+- Reduce order lifetime (cancel faster)
+
+**If Hypothesis B (Inventory Imbalance)**:
+- Close existing position first
+- Start fresh with no inventory
+- Implement strict inventory limits
+
+**If Hypothesis C (Fee Miscalculation)**:
+- Verify maker vs taker fee on each fill
+- Adjust P&L calculation
+- May need to switch to limit-only orders
+
+**If Hypothesis D (Rounding/Slippage)**:
+- Verify tick size handling
+- Check fill price in API response vs order price
+- May be unavoidable exchange behavior
+
+---
+
+## Implementation Plan
+
+### Phase 1: Sentiment Data Collection (Day 1)
+
+1. Create `llm_agent/data/sentiment_fetcher.py`
+2. Implement Fear & Greed API
+3. Implement Long/Short Ratio API
+4. Implement funding rate aggregation
+5. Store in `logs/sentiment_data.json`
+
+### Phase 2: Shared Learning Layer (Day 2)
+
+1. Create `llm_agent/shared_learning.py`
+2. Implement shared insights JSON structure
+3. Add write hooks to both Hibachi and Extended bots
+4. Add read hooks at start of each decision cycle
+5. Implement hourly sync logic
+
+### Phase 3: Hold Strategy Update (Day 3)
+
+1. Modify `hibachi_agent/execution/strategy_a_exit_rules.py`
+2. Modify `extended_agent/execution/` equivalent
+3. Add confidence-based hold logic
+4. Test in dry-run mode
+5. Deploy with careful monitoring
+
+### Phase 4: Paradex Investigation (Day 1-2)
+
+1. Add detailed logging to `scripts/grid_mm_live.py`
+2. Collect 24 hours of fill data
+3. Analyze fill patterns
+4. Implement fix based on findings
+5. Test with small capital
+
+### Phase 5: Qwen Cross-Bot Consultation (Day 4)
+
+1. Create prompt template for cross-bot analysis
+2. Implement 6-hour Qwen sync
+3. Parse recommendations into shared insights
+4. Test recommendation quality
+
+---
+
+## Success Metrics
+
+| Metric | Current | Target | Timeframe |
+|--------|---------|--------|-----------|
+| Hibachi Daily P&L | -$5 to -$10 | +$2 to +$5 | 2 weeks |
+| Extended Daily P&L | -$3 to -$5 | +$1 to +$3 | 2 weeks |
+| Average Hold Time | 1-2 hours | 12-24 hours | Immediate |
+| Trades Per Day (Both) | 15-20 | 3-6 | Immediate |
+| Paradex Fill P&L | -$0.01 avg | +$0.005 avg | 1 week |
+| Combined Win Rate | 25-30% | 40-45% | 2 weeks |
+
+---
+
+## Risk Mitigation
+
+1. **Longer holds = larger drawdowns**: Implement 4% hard stop, no exceptions
+2. **Sentiment data staleness**: Cache with TTL, fallback to neutral
+3. **Cross-bot conflicts**: Check shared positions before entry
+4. **Paradex investigation**: Don't deploy fixes until root cause confirmed
+
+---
+
+## Files to Create/Modify
+
+### New Files
+- `llm_agent/data/sentiment_fetcher.py` - Sentiment API aggregator
+- `llm_agent/shared_learning.py` - Cross-bot learning layer
+- `logs/shared_insights.json` - Shared state file
+- `logs/sentiment_data.json` - Sentiment cache
+
+### Modified Files
+- `hibachi_agent/bot_hibachi.py` - Add shared learning hooks
+- `extended_agent/bot_extended.py` - Add shared learning hooks
+- `hibachi_agent/execution/strategy_a_exit_rules.py` - Longer hold logic
+- `scripts/grid_mm_live.py` - Enhanced fill logging
+
+---
+
+## Appendix: Current Bot Performance Data
+
+### Hibachi Recent Performance (Strategy F)
+- Win Rate: ~25% (SHORT) / ~38% (LONG)
+- Average Hold: 45 minutes
+- Fees + Spread: ~0.25% round-trip
+- Net Result: Losing due to fee drag
+
+### Extended Recent Performance (Strategy D Pairs)
+- Win Rate: ~41%
+- Average Hold: 60 minutes (pairs hold)
+- Fees + Spread: ~0.30% round-trip
+- Net Result: Roughly break-even on pairs, losing on directional
+
+### Paradex Grid MM (v8)
+- Fill Rate: Low but fills ARE happening
+- P&L tracking: Shows position unrealized P&L, not trading P&L
+- **ROOT CAUSE IDENTIFIED**: Adverse selection confirmed
+  - Position started SHORT @ $94,031
+  - Grid added to SHORT at $93,248 (price fell, we sold more = wrong direction)
+  - Eventually flipped to LONG @ $93,569
+  - We're always getting filled on the side that loses
+- The grid is buying when price is rising (FOMO) and selling when price is falling (panic)
+- This is the opposite of profitable market making
+
+**Fix Required**:
+1. Close existing position to start fresh
+2. Implement inventory skew that REDUCES position, not adds to it
+3. When SHORT and price falling: BUY to close, not SELL more
+4. Add momentum filter to pause orders in strong trends
+
+---
+
+## Change Log
+
+- 2026-01-06: Initial PRD created

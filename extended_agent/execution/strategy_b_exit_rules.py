@@ -1,15 +1,19 @@
 """
-Strategy B Exit Rules - RUNNERS_RUN (for Extended)
-Based on 2025-11-27 research / Qwen analysis + user preference
+Strategy B Exit Rules - PROFIT FOCUSED (for Extended)
+Updated 2026-01-06: Pivot from volume to profit-focused longer holds
 
 KEY PARAMETERS:
-- Take Profit: 8%
-- Stop Loss: 1%
-- Max Hold: UNLIMITED (let runners run)
-- Trailing Stop: Activates at +2%, trails by 1.5%
-- Max Trades/Day: 20
+- Take Profit: 8% (let winners run)
+- Stop Loss: 4% (wider to avoid stop hunts)
+- Max Hold: 48 HOURS (allow overnight/multi-day)
+- Min Hold: 60 minutes (prevent panic exits)
+- Trailing Stop: Activates at +3%, trails by 1.5%
+- Max Trades/Day: 6 (quality over quantity)
 
-This strategy prioritizes LETTING WINNERS RUN over high volume.
+NEW PHILOSOPHY (2026-01-06):
+- Fees + spread = ~0.30% per trade on Extended, quick trades lose money
+- Hold positions longer when confident, cut losers after 4h if underwater
+- Synchronized with Hibachi via shared_learning.py
 """
 
 from datetime import datetime, timedelta
@@ -21,22 +25,27 @@ logger = logging.getLogger(__name__)
 
 class StrategyBExitRules:
     """
-    RUNNERS_RUN exit strategy - no time limit, trailing stops.
+    PROFIT FOCUSED exit strategy - hold for 24-48 hours, let winners run.
 
-    Philosophy: Cut losers fast, let winners run
-    Math: Fewer trades but higher R/R (8:1) means bigger wins
+    Philosophy: Quality trades with bigger targets > many small trades
+    Math: 6 trades/day × 40% win rate × 2:1 R/R = sustainable profit
+
+    v8 Update (2026-01-06): Pivot from volume to profit
+    - Fees + spread grinding down edge on quick trades
+    - Longer holds let winners develop, justify the fee drag
+    - Synchronized with Hibachi via shared_learning.py
     """
 
-    # Strategy constants (UPDATED 2025-12-02 - Backtest Proven)
-    STRATEGY_NAME = "STRATEGY_B_FIXED_TP_SL"
-    TAKE_PROFIT_PCT = 1.5      # +1.5% exit (BACKTEST PROVEN - was 8%)
-    STOP_LOSS_PCT = 2.0        # -2% exit (Cap losses - was 1%)
-    MAX_HOLD_HOURS = 1.0       # 1 hour max (only if profitable)
-    MIN_HOLD_MINUTES = 0.0     # No minimum (allow quick exits)
-    MAX_TRADES_PER_DAY = 50    # Increased from 20
+    # Strategy constants - PROFIT FOCUSED (2026-01-06)
+    STRATEGY_NAME = "STRATEGY_B_PROFIT_FOCUS"
+    TAKE_PROFIT_PCT = 8.0      # +8% exit (let winners run)
+    STOP_LOSS_PCT = 4.0        # -4% exit (wider to avoid stop hunts)
+    MAX_HOLD_HOURS = 48.0      # 48 hour max (allow overnight/multi-day)
+    MIN_HOLD_MINUTES = 60.0    # 60 min minimum (prevent panic exits)
+    MAX_TRADES_PER_DAY = 6     # Quality over quantity
 
-    # Trailing stop parameters (DISABLED for now)
-    TRAILING_ACTIVATION_PCT = 999.0   # Effectively disabled
+    # Trailing stop parameters (ENABLED)
+    TRAILING_ACTIVATION_PCT = 3.0     # Activate at +3%
     TRAILING_DISTANCE_PCT = 1.5       # Trail 1.5% from peak
 
     def __init__(self):
@@ -48,10 +57,12 @@ class StrategyBExitRules:
         self.trailing_active: Dict[str, bool] = {}     # Track if trailing is active
 
         logger.info("=" * 60)
-        logger.info(f"STRATEGY B: RUNNERS_RUN")
+        logger.info(f"STRATEGY B: PROFIT FOCUSED")
         logger.info(f"  TP: +{self.TAKE_PROFIT_PCT}%  |  SL: -{self.STOP_LOSS_PCT}%")
-        logger.info(f"  Max Hold: UNLIMITED  |  Max Trades: {self.MAX_TRADES_PER_DAY}/day")
+        logger.info(f"  Max Hold: {self.MAX_HOLD_HOURS}h  |  Min Hold: {self.MIN_HOLD_MINUTES}min")
+        logger.info(f"  Max Trades: {self.MAX_TRADES_PER_DAY}/day")
         logger.info(f"  Trailing: Activates +{self.TRAILING_ACTIVATION_PCT}%, trails {self.TRAILING_DISTANCE_PCT}%")
+        logger.info(f"  Cut Losers: After 4h if underwater")
         logger.info("=" * 60)
 
     def _reset_daily_count_if_new_day(self):
@@ -164,7 +175,19 @@ class StrategyBExitRules:
             return True, f"STOP LOSS: {pnl_pct:.2f}%"
 
         # ═══════════════════════════════════════════════════════════════
-        # RULE 3: TRAILING STOP - THE KEY DIFFERENTIATOR
+        # RULE 3: CUT LOSER EARLY (4 hours if underwater)
+        # ═══════════════════════════════════════════════════════════════
+        if hold_hours >= 4.0 and pnl_pct < 0:
+            logger.info("=" * 50)
+            logger.info(f"✂️  [STRATEGY-B] CUT LOSER")
+            logger.info(f"   Symbol: {symbol} ({side})")
+            logger.info(f"   Hold time: {hold_hours:.2f}h >= 4h AND losing")
+            logger.info(f"   P/L: {pnl_pct:+.2f}%")
+            logger.info("=" * 50)
+            return True, f"CUT LOSER: {hold_hours:.2f}h underwater (P/L: {pnl_pct:+.2f}%)"
+
+        # ═══════════════════════════════════════════════════════════════
+        # RULE 4: TRAILING STOP - LET WINNERS RUN
         # ═══════════════════════════════════════════════════════════════
         # Check if trailing should activate
         if pnl_pct >= self.TRAILING_ACTIVATION_PCT:

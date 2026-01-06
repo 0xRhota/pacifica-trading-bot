@@ -41,6 +41,8 @@ from extended_agent.execution.strategy_d_pairs_trade import StrategyDPairsTrade
 from extended_agent.execution.strategy_e_self_improving_pairs import StrategyESelfImprovingPairs
 from extended_agent.execution.fast_exit_monitor import FastExitMonitor
 from extended_agent.data.extended_aggregator import ExtendedMarketDataAggregator
+from llm_agent.data.sentiment_fetcher import SentimentFetcher
+from llm_agent.shared_learning import SharedLearning
 
 # Load environment variables from project root
 project_root_env = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
@@ -139,6 +141,14 @@ class ExtendedTradingBot:
         )
         logger.info(f"LLM Model: {model}")
 
+        # Initialize Sentiment Fetcher (Fear & Greed, funding rates)
+        self.sentiment_fetcher = SentimentFetcher()
+        logger.info("📊 Sentiment Fetcher initialized (Fear & Greed + funding)")
+
+        # Initialize Shared Learning (cross-bot insights with Hibachi)
+        self.shared_learning = SharedLearning(bot_name="extended")
+        logger.info("🧠 Shared Learning initialized (cross-bot insights)")
+
         # Track last deep research cycle
         self.last_deep_research_time = datetime.now()
         self.deep_research_interval = 3600  # 1 hour
@@ -190,9 +200,8 @@ class ExtendedTradingBot:
             self.pairs_strategy = StrategyDPairsTrade(
                 position_size_usd=position_size,
                 hold_time_seconds=3600,  # 1 hour
-                long_asset="ETH-USD",
-                short_asset="BTC-USD",
-                llm_agent=self.llm_agent  # Pass LLM for dynamic direction selection
+                available_assets=["BTC-USD", "ETH-USD", "SOL-USD"],  # LLM picks any pair
+                llm_agent=self.llm_agent  # Pass LLM for dynamic pair selection
             )
             self.exit_rules = None  # No exit rules - pairs strategy handles its own exits
             self.copy_strategy = None
@@ -204,13 +213,12 @@ class ExtendedTradingBot:
             logger.info("█" * 70)
             logger.info("=" * 70)
             logger.info("")
-            logger.info(f"  LONG:  {self.pairs_strategy.LONG_ASSET}")
-            logger.info(f"  SHORT: {self.pairs_strategy.SHORT_ASSET}")
+            logger.info(f"  ASSETS: {', '.join(self.pairs_strategy.available_assets)}")
             logger.info(f"  SIZE:  ${position_size} per leg (${position_size*2} total)")
             logger.info(f"  HOLD:  {self.pairs_strategy.hold_time_seconds/60:.0f} minutes")
             logger.info("")
             logger.info("  MECHANICS:")
-            logger.info("    - Open opposing positions (long ETH, short BTC)")
+            logger.info("    - LLM picks best pair from available assets")
             logger.info("    - Hold for 1 hour")
             logger.info("    - Close both positions")
             logger.info("    - Log actual PnL from exchange")
@@ -225,8 +233,7 @@ class ExtendedTradingBot:
             self.pairs_strategy = StrategyESelfImprovingPairs(
                 position_size_usd=position_size,
                 hold_time_seconds=3600,  # 1 hour
-                long_asset="ETH-USD",
-                short_asset="BTC-USD",
+                available_assets=["BTC-USD", "ETH-USD", "SOL-USD"],  # LLM picks any pair
                 llm_agent=self.llm_agent
             )
             self.exit_rules = None
@@ -443,6 +450,31 @@ class ExtendedTradingBot:
             # Extended markets list
             extended_symbols = list(market_data_dict.keys())
 
+            # ═══════════════════════════════════════════════════════════════
+            # SENTIMENT DATA - Fear & Greed, funding rates (2026-01-06)
+            # ═══════════════════════════════════════════════════════════════
+            sentiment_context = ""
+            try:
+                sentiment_data = await self.sentiment_fetcher.fetch_all()
+                if sentiment_data:
+                    sentiment_context = self.sentiment_fetcher.get_prompt_context(sentiment_data)
+                    # Update shared learning with latest sentiment
+                    self.shared_learning.update_sentiment(sentiment_data)
+                    logger.info(f"[SENTIMENT] Fear & Greed: {sentiment_data.get('fear_greed', {}).get('value', 'N/A')} | Combined: {sentiment_data.get('combined_score', 'N/A')}")
+            except Exception as e:
+                logger.warning(f"[SENTIMENT] Could not fetch sentiment: {e}")
+
+            # ═══════════════════════════════════════════════════════════════
+            # SHARED LEARNING - Cross-bot insights (Extended <-> Hibachi)
+            # ═══════════════════════════════════════════════════════════════
+            shared_learning_context = ""
+            try:
+                shared_learning_context = self.shared_learning.get_prompt_context()
+                if shared_learning_context:
+                    logger.info("[SHARED] Cross-bot learning context added to LLM prompt")
+            except Exception as e:
+                logger.warning(f"[SHARED] Could not fetch shared learning: {e}")
+
             # Build kwargs based on prompt version
             prompt_kwargs = {
                 "market_table": market_table,
@@ -452,7 +484,9 @@ class ExtendedTradingBot:
                 "trade_history": trade_history,
                 "recently_closed_symbols": recently_closed or [],
                 "dex_name": "Extended",
-                "analyzed_tokens": extended_symbols
+                "analyzed_tokens": extended_symbols,
+                "sentiment_context": sentiment_context,  # Fear & Greed, funding rates
+                "shared_learning_context": shared_learning_context  # Cross-bot insights
             }
 
             # Extended: Skip macro context for high-frequency scalping

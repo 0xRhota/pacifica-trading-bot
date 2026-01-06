@@ -161,6 +161,31 @@ class HibachiSDK:
             logger.error(f"Error getting balance: {e}")
             return None
 
+    async def get_account_info(self) -> Optional[Dict]:
+        """
+        Get full account info including margin details
+
+        Returns:
+            Dict with balance, equity, available_margin, etc.
+        """
+        try:
+            account_id = self.get_account_id()
+            if not account_id:
+                logger.error("Cannot get account info: account ID not set.")
+                return None
+
+            response = await self._request("GET", f"/capital/balance", params={"accountId": account_id})
+            if "error" in response:
+                logger.error(f"Failed to get account info: {response['error']}")
+                return None
+
+            # Return full response for caller to parse
+            return response
+
+        except Exception as e:
+            logger.error(f"Error getting account info: {e}")
+            return None
+
     async def get_positions(self) -> List[Dict]:
         """
         Get all open positions
@@ -187,6 +212,85 @@ class HibachiSDK:
         except Exception as e:
             logger.error(f"Error getting positions: {e}")
             return []
+
+    async def get_position_size(self, symbol: str) -> float:
+        """
+        Get position size for a specific symbol
+
+        Args:
+            symbol: Market symbol (e.g., "BTC/USDT-P")
+
+        Returns:
+            Position size (positive for long, negative for short, 0 if no position)
+        """
+        try:
+            positions = await self.get_positions()
+            for p in positions:
+                if p.get('symbol') == symbol:
+                    # API returns 'quantity' not 'size', and 'direction' for Long/Short
+                    qty = float(p.get('quantity', p.get('size', 0)))
+                    direction = p.get('direction', 'Long')
+                    # Return negative for short positions
+                    if direction == 'Short':
+                        qty = -qty
+                    return qty
+            return 0.0
+        except Exception as e:
+            logger.error(f"Error getting position size for {symbol}: {e}")
+            return 0.0
+
+    async def verify_order_fill(
+        self,
+        symbol: str,
+        expected_change: float,
+        position_before: float,
+        max_wait_seconds: float = 3.0
+    ) -> Dict:
+        """
+        Verify that an order actually filled by checking position change
+
+        Args:
+            symbol: Market symbol
+            expected_change: Expected position change (positive for buy, negative for sell)
+            position_before: Position size before order was placed
+            max_wait_seconds: Maximum time to wait for fill confirmation
+
+        Returns:
+            Dict with 'filled' boolean and 'position_after' or 'error' message
+        """
+        import asyncio
+
+        # Wait briefly for order to process
+        await asyncio.sleep(0.5)
+
+        # Check position multiple times
+        checks = int(max_wait_seconds / 0.5)
+        for i in range(checks):
+            position_after = await self.get_position_size(symbol)
+            actual_change = position_after - position_before
+
+            # Check if position changed in expected direction
+            # Allow for some tolerance due to partial fills or rounding
+            if expected_change > 0:  # Buy order
+                if actual_change > expected_change * 0.8:  # 80% of expected is good enough
+                    logger.info(f"✅ Order VERIFIED: position changed {position_before:.6f} → {position_after:.6f}")
+                    return {'filled': True, 'position_after': position_after, 'actual_change': actual_change}
+            else:  # Sell order
+                if actual_change < expected_change * 0.8:
+                    logger.info(f"✅ Order VERIFIED: position changed {position_before:.6f} → {position_after:.6f}")
+                    return {'filled': True, 'position_after': position_after, 'actual_change': actual_change}
+
+            if i < checks - 1:
+                await asyncio.sleep(0.5)
+
+        # Order did not fill
+        logger.error(f"❌ Order NOT FILLED: position unchanged at {position_before:.6f} (expected change: {expected_change:.6f})")
+        return {
+            'filled': False,
+            'error': 'Order accepted but not filled - likely rejected due to insufficient margin',
+            'position_before': position_before,
+            'position_after': position_after
+        }
 
     async def get_orderbook(self, symbol: str) -> Optional[Dict]:
         """
@@ -448,11 +552,12 @@ class HibachiSDK:
                     else:
                         error_text = await resp.text()
                         logger.error(f"Failed to create order - API Error {resp.status}: {error_text}")
-                        return None
+                        # Return error dict so executor can detect and retry
+                        return {'error': error_text, 'status': resp.status}
 
         except Exception as e:
             logger.error(f"Error creating order: {e}")
-            return None
+            return {'error': str(e)}
 
     async def cancel_order(self, order_id: str) -> bool:
         """

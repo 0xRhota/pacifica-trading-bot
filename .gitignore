@@ -31,6 +31,7 @@ wheels/
 
 # Environments
 .env
+.env.README
 .venv
 env/
 venv/
@@ -75,3 +76,10 @@ node_modules/
 # tasks/ 
 research/agent-lightning-TEST
 PLANNING.md
+TODO.md
+
+# Trade history exports
+*.csv
+trade-history-*.csv
+.DS_Store
+**/.DS_Store

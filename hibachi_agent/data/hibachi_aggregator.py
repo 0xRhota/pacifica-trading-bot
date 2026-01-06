@@ -21,13 +21,20 @@ from hibachi_agent.data.hibachi_fetcher import HibachiDataFetcher
 
 logger = logging.getLogger(__name__)
 
-# WHITELIST: Only trade profitable symbols
-# Based on 5000+ trade analysis (2025-12-18):
-#   - SOL: -$73.38 total loss, worst performer - BLOCKED
-#   - ETH: -$35.94 total loss - questionable but keep for now
-#   - BTC SHORT only: +$19.20 profit, 33% win rate - ONLY profitable combo
-# Removing SOL entirely - it consistently loses
-WHITELISTED_SYMBOLS = {"ETH/USDT-P", "BTC/USDT-P"}
+# WHITELIST: Low-liquidity pairs for Strategy G
+# Based on 2026-01-02 analysis:
+#   - BTC/ETH lost $116 in 7 days with 20% win rate + $51 fees
+#   - Pivoting to low-liq pairs where retail hasn't priced in moves
+#   - Avoiding majors (BTC, ETH, SOL) - too efficient
+# Strategy G: Low-Liquidity Momentum Hunter
+WHITELISTED_SYMBOLS = {
+    # Tier 1: Newest/Most Volatile
+    "HYPE/USDT-P", "PUMP/USDT-P", "VIRTUAL/USDT-P",
+    "ENA/USDT-P", "PROVE/USDT-P", "XPL/USDT-P",
+    # Tier 2: Mid-Volatility
+    "DOGE/USDT-P", "SEI/USDT-P", "SUI/USDT-P",
+    "BNB/USDT-P", "ZEC/USDT-P", "XRP/USDT-P"
+}
 
 
 class HibachiMarketDataAggregator:

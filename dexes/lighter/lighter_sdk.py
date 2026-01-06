@@ -33,6 +33,8 @@ class LighterSDK:
 
         config = lighter.Configuration(host=self.url)
         self.api_client = lighter.ApiClient(configuration=config)
+        # Override default user-agent to avoid CloudFront blocking "OpenAPI-Generator"
+        self.api_client.user_agent = 'Mozilla/5.0 (compatible; TradingBot/1.0)'
         self.account_api = lighter.AccountApi(self.api_client)
         self.order_api = lighter.OrderApi(self.api_client)  # Initialize for trade history
         self.transaction_api = lighter.TransactionApi(self.api_client)  # For transaction history
@@ -46,7 +48,8 @@ class LighterSDK:
         """
         try:
             import aiohttp
-            async with aiohttp.ClientSession() as session:
+            headers = {'User-Agent': 'Mozilla/5.0 (compatible; TradingBot/1.0)'}
+            async with aiohttp.ClientSession(headers=headers) as session:
                 async with session.get(f"{self.url}/api/v1/orderBooks") as resp:
                     if resp.status == 200:
                         data = await resp.json()

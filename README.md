@@ -1,170 +1,160 @@
 # Hopium Agents
 
-Autonomous LLM-powered trading agents. An experiment in AgentFi - letting AI make trading decisions based on quantitative market data.
+LLM trading agents for perpetual DEXs. Feed quant data (funding, OI, volume, RSI, MACD), let the model decide.
 
-**This is experimental software.** I run these agents with real money to learn what works and what doesn't. It may make money, it may lose money. The logs and trade history are here for education, not as financial advice.
+---
 
-## What This Is
+## Setup
 
-Trading agents that feed an LLM (DeepSeek/Qwen/Claude) market data and let it decide: BUY, SELL, CLOSE, or HOLD. No hard-coded rules - the LLM interprets the data and makes autonomous decisions.
+```bash
+git clone https://github.com/[your-username]/hopium-agents.git
+cd hopium-agents
+pip install -r requirements.txt
+cp .env.example .env
+```
 
-The system is exchange-agnostic. You can connect it to any DEX or CEX by implementing a simple adapter.
+Edit `.env` with your keys:
+```bash
+OPEN_ROUTER=your_openrouter_key
+CAMBRIAN_API_KEY=your_cambrian_key
+
+# Pick your exchange
+HIBACHI_PUBLIC_KEY=...
+HIBACHI_PRIVATE_KEY=...
+# or
+LIGHTER_PUBLIC_KEY=...
+LIGHTER_PRIVATE_KEY=...
+```
+
+---
+
+## Running a Bot
+
+```bash
+# Hibachi (recommended, has most strategy options)
+python3 -m hibachi_agent.bot_hibachi --live --strategy F --interval 600
+
+# Lighter
+python3 -m lighter_agent.bot_lighter --live --interval 300
+
+# Extended (requires Python 3.11+)
+python3.11 -m extended_agent.bot_extended --live --strategy D --interval 300
+
+# Grid MM on Paradex
+python3 scripts/grid_mm_live.py
+```
+
+Options:
+- `--dry-run`: No real trades, just log decisions
+- `--live`: Real trading
+- `--strategy X`: Pick a strategy (see below)
+- `--interval N`: Seconds between decision cycles
+
+---
+
+## Strategies
+
+**Full documentation: [docs/STRATEGIES.md](docs/STRATEGIES.md)**
+
+Quick reference:
+
+| Flag | Strategy | What It Does |
+|------|----------|--------------|
+| F | Self-improving | Learns from trade outcomes. Auto-blocks losing symbol/direction combos. |
+| D | Pairs trade | Long ETH + Short BTC (or vice versa). LLM picks which to long. |
+| G | Low-liq hunter | Targets volatile pairs (HYPE, PUMP, etc). Trailing stops. |
+| A | Hard exits | +4% TP, -2% SL, 2h max hold. Overrides LLM. |
+| C | Copy whale | Mirrors 0x023a wallet positions proportionally. |
+
+### How the Bot Decides
+
+1. Fetches market data (price, RSI, MACD, volume, funding, OI)
+2. Builds prompt with data + strategy context
+3. Queries LLM (Qwen via OpenRouter)
+4. Validates decisions, executes trades
+5. Monitors for exit conditions
+
+The **strategy** controls what goes into the prompt and how exits are handled.
+
+### Active Prompt: v9_qwen_enhanced
+
+Based on Alpha Arena Season 1 winner (+22.3% in 17 days).
+
+**Signal scoring:** RSI + MACD + Volume + Price Action + OI confluence.
+**Rule:** Score >= 3.0 required to trade.
+**Philosophy:** 30% win rate is fine if winners are 3x losers.
+
+File: `llm_agent/prompts_archive/v9_qwen_enhanced.txt`
+
+### Grid Market Making
+
+`scripts/grid_mm_live.py` runs on Paradex:
+- `spread_bps`: Spread in basis points (default 1.5)
+- `pause_duration`: Seconds to pause after fills (default 15)
+- `inventory_limit`: Max position as % of account (default 25%)
+
+---
 
 ## Data Sources
 
-The prompt is just text - you can feed the LLM any data you can fetch. Here's what's possible and what we've actually used:
+The bots fetch:
+- Price, volume, funding rate from exchange APIs
+- RSI, MACD, EMA calculated locally
+- Open interest from exchange
+- Deep42 sentiment from Cambrian API (optional)
 
-**What we feed the LLM (currently using):**
-- Funding rates - long/short bias from perp funding
-- Open Interest - total open positions (market leverage)
-- Volume - 24h trading volume
-- RSI, MACD, EMA/SMA - technical indicators (calculated from OHLCV)
-- Order book - bid/ask depth and imbalance
-- Price - current spot/mark price
-- Deep42 sentiment - AI market intelligence from Cambrian Network
+---
 
-**What you could add:**
-- Any API data you can fetch (social sentiment, on-chain metrics, news, etc.)
-- Any calculation you can run on OHLCV data
-- Any external signal or indicator
+## Logs
 
-The prompt is the interface. If you can turn it into text, the LLM can use it.
+All logs go to `logs/`:
+- `logs/hibachi_bot.log` - Bot decisions and errors
+- `logs/trades/hibachi.json` - Trade history
+- `logs/strategy_switches.log` - Strategy change history
 
-## Connected Exchanges
-
-This system works with any exchange. Here are the ones we've connected and actively run strategies on:
-
-| Exchange | Agent Directory | Status |
-|----------|-----------------|--------|
-| Hibachi | `hibachi_agent/` | Active |
-| Lighter | `lighter_agent/` | Active |
-| Lighter | `extended_agent/` | Active |
-| Pacifica | `pacifica_agent/` | Paused |
-
-Each agent uses the same centralized strategy system in `llm_agent/`. The exchange-specific code just handles data fetching and order execution.
-
-## Quick Start
-
-```bash
-# Clone
-git clone https://github.com/[your-username]/hopium-agents.git
-cd hopium-agents
-
-# Install
-pip install -r requirements.txt
-
-# Configure
-cp .env.example .env
-# Edit .env with your API keys
-
-# Run an agent
-python3 -m hibachi_agent.bot_hibachi --live --interval 600
-python3 -m lighter_agent.bot_lighter --live --interval 300
-python3 -m extended_agent.bot_extended --live --strategy C --interval 300
-```
+---
 
 ## Project Structure
 
 ```
 hopium-agents/
-├── hibachi_agent/      # Exchange adapter
-├── lighter_agent/      # Exchange adapter
-├── extended_agent/     # Exchange adapter
-├── pacifica_agent/     # Exchange adapter
-├── llm_agent/          # Shared strategy engine (all agents use this)
-│   ├── llm/            # LLM integration
-│   ├── data/           # Market data fetchers & indicators
-│   └── prompts_archive/# Historical prompt versions
-├── dexes/              # Exchange SDKs
-├── research/           # Research and experiments
-└── logs/               # Trade logs (gitignored)
+├── hibachi_agent/          # Hibachi DEX bot
+├── lighter_agent/          # Lighter DEX bot
+├── extended_agent/         # Extended DEX bot
+├── paradex_agent/          # Paradex bot
+├── llm_agent/              # Shared LLM code
+│   ├── llm/                # Model client, prompt formatting
+│   └── prompts_archive/    # Prompt versions (v1-v9)
+├── dexes/                  # Exchange SDK wrappers
+├── scripts/                # Utility scripts
+└── logs/                   # Trade logs (gitignored)
 ```
 
-## How It Works
+---
 
-Every N minutes (configurable):
+## Docs
 
-1. Fetch market data from exchange
-2. Calculate indicators (RSI, MACD, EMA, funding, OI)
-3. Query Deep42 for macro sentiment (optional)
-4. Send everything to LLM with current positions
-5. LLM returns decision + reasoning
-6. Execute the trade
+| Doc | What it is |
+|-----|------------|
+| [docs/STRATEGIES.md](docs/STRATEGIES.md) | Detailed strategy documentation (parameters, files, how they work) |
+| [CLAUDE.md](CLAUDE.md) | For AI agents working on this codebase |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
+| [Project_Analysis.md](Project_Analysis.md) | My testing history, what worked, what didn't |
+| [research/Learnings.md](research/Learnings.md) | Strategy learnings |
 
-The LLM prompt is the strategy. We've iterated through 17 prompt versions so far - from simple technicals-only to complex multi-timeframe analysis. See `logs/strategy_switches.log` for the evolution.
+---
 
-## Strategy History
+## My Testing Results
 
-We track every strategy change in `logs/strategy_switches.log`. Some highlights:
+I've run 16,803 trades across 50+ strategy iterations. Key findings:
+- 0.8 LLM confidence = 44% actual win rate (don't trust confidence)
+- Hard exit rules beat LLM discretion on exits
+- SHORT outperforms LONG on Lighter/Extended
+- BCH, BNB, ZEC are consistent losers
 
-- **deep42-v1**: First Deep42 integration
-- **technicals-only-v1**: Removed Deep42 "risk-off" panic that was killing winners
-- **hard-exit-rules-v1**: Added forced exits at +2%/-1.5% to override LLM discretion
-- **aggressive-selective-v1**: Quality over quantity - 2-5 positions max
-- **deep42-bias-v7**: Current - Dynamic Deep42 directional bias
+Full analysis: [Project_Analysis.md](Project_Analysis.md)
 
-## Cambrian Integration
-
-We use [Cambrian Network](https://cambrian.network) for AI-powered market intelligence:
-
-- **Deep42**: Natural language market queries ("Is the market risk-on or risk-off?")
-- **Risk Engine**: Monte Carlo liquidation probability (gates risky trades)
-- **OHLCV API**: Historical candle data for backtesting
-
-## Configuration
-
-Required in `.env`:
-
-```bash
-# LLM (pick one)
-DEEPSEEK_API_KEY=your_key
-# or CLAUDE_API_KEY, OPEN_ROUTER, etc.
-
-# Cambrian (optional but recommended)
-CAMBRIAN_API_KEY=your_key
-
-# Exchange credentials (for the agent you're running)
-# See .env.example for full list
-```
-
-## Agent Commands
-
-```bash
-# Check what's running
-ps aux | grep -E "(hibachi|lighter|extended|pacifica)_agent"
-
-# View logs
-tail -f logs/hibachi_bot.log
-tail -f logs/lighter_bot.log
-tail -f logs/extended_bot.log
-
-# Stop an agent
-pkill -f "hibachi_agent.bot_hibachi"
-
-# Start in background
-nohup python3 -u -m hibachi_agent.bot_hibachi --live --interval 600 > logs/hibachi_bot.log 2>&1 &
-```
-
-## Logs
-
-The `logs/` directory contains my personal trading logs. They're gitignored but worth mentioning:
-
-1. **Educational value**: Real LLM decisions and outcomes
-2. **Not for copying**: My trades, my risk tolerance
-3. **Strategy evolution**: `logs/strategy_switches.log` shows iteration history
-
-## For AI Agents
-
-If you're an AI agent (Claude, GPT, etc.) working on this codebase, see [CLAUDE.md](CLAUDE.md).
-
-## Disclaimer
-
-This is an experiment in AgentFi - exploring what happens when you let LLMs make trading decisions. It may make money, it may lose money. I run it to learn, not because it's profitable.
-
-- Don't trade money you can't afford to lose
-- Don't copy trades or strategies directly
-- Past performance means nothing
-- Not financial advice
+---
 
 ## License
 

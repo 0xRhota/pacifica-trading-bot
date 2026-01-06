@@ -220,10 +220,21 @@ class ModelClient:
                     message = data["choices"][0]["message"]
                     content = message.get("content", "")
 
-                    # If content is empty, check for reasoning (Qwen's thinking mode)
-                    if not content and "reasoning" in message:
-                        # The actual response comes after thinking
-                        # For now, just note this in logs
+                    # Handle Qwen reasoning mode - extract answer after </think> tag
+                    if not content and "reasoning_content" in message:
+                        # Qwen3 models put reasoning in reasoning_content, answer in content
+                        reasoning = message.get("reasoning_content", "")
+                        logger.info(f"Qwen reasoning mode - reasoning: {len(reasoning)} chars")
+                        # Content should have the answer, but if empty use reasoning
+                        if not content and reasoning:
+                            # Extract answer from reasoning if it has </think> pattern
+                            if "</think>" in reasoning:
+                                content = reasoning.split("</think>")[-1].strip()
+                            else:
+                                content = reasoning
+                            logger.info(f"Extracted content from reasoning: {len(content)} chars")
+                    elif not content and "reasoning" in message:
+                        # Older reasoning format
                         logger.warning("Qwen response in reasoning mode - content may be truncated")
 
                     usage = data.get("usage", {})

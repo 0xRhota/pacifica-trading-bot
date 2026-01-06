@@ -385,38 +385,178 @@ class HibachiTradeExecutor:
                     'dry_run': True
                 }
 
-            # Execute real order
-            order = await self.sdk.create_market_order(symbol, is_buy, amount)
+            # Execute real order with dynamic risk limit retry
+            max_retries = 3  # More retries for dynamic sizing
+            current_amount = amount
+            current_notional = position_size_usd
+            import re
 
-            if order:
-                logger.info(f"✅ Order placed: {order}")
+            # CRITICAL: Get position BEFORE placing order to verify fill later
+            position_before = await self.sdk.get_position_size(symbol)
 
-                # Record in tracker
-                self.tracker.log_entry(
-                    order_id=order.get('orderId'),
-                    symbol=symbol,
-                    side=action.lower(),
-                    entry_price=price,
-                    size=amount,
-                    notes=reason
-                )
+            for attempt in range(max_retries + 1):
+                order = await self.sdk.create_market_order(symbol, is_buy, current_amount)
 
-                return {
-                    'success': True,
-                    'action': action,
-                    'symbol': symbol,
-                    'price': price,
-                    'amount': amount,
-                    'order': order
-                }
-            else:
-                logger.error(f"❌ Order failed for {symbol}")
-                return {
-                    'success': False,
-                    'action': action,
-                    'symbol': symbol,
-                    'error': 'Order execution failed'
-                }
+                # Check for error response (SDK now returns {'error': msg} instead of None)
+                if order and isinstance(order, dict) and 'error' in order:
+                    error_msg = str(order.get('error', '')).lower()
+                    logger.warning(f"⚠️ Order error for {symbol}: {error_msg[:100]}")
+
+                    # Check if this is a retryable risk/margin error
+                    is_risk_error = any(kw in error_msg for kw in [
+                        'risk', 'limit', 'exceed', 'margin', 'insufficient',
+                        'balance', 'collateral', 'equity', 'max', 'position'
+                    ])
+
+                    if is_risk_error and attempt < max_retries:
+                        # Strategy 1: Get actual available margin from account
+                        try:
+                            account_info = await self.sdk.get_account_info()
+                            if account_info and isinstance(account_info, dict):
+                                # Try multiple possible field names
+                                available = None
+                                for field in ['availableMargin', 'available_margin', 'freeMargin',
+                                              'available', 'withdrawable', 'equity', 'balance']:
+                                    val = account_info.get(field)
+                                    if val is not None:
+                                        try:
+                                            available = float(val)
+                                            if available > 0:
+                                                break
+                                        except (ValueError, TypeError):
+                                            continue
+
+                                if available and available > 10:
+                                    # Size to 60% of available (conservative buffer)
+                                    new_notional = available * 0.60
+                                    if new_notional < current_notional:
+                                        current_notional = new_notional
+                                        current_amount = current_notional / price
+                                        logger.warning(
+                                            f"⚠️ [RISK-RETRY] Sizing to 60% of available: "
+                                            f"${current_notional:.2f} (attempt {attempt + 2}/{max_retries + 1})"
+                                        )
+                                        continue
+                        except Exception as e:
+                            logger.warning(f"Could not get account info: {e}")
+
+                        # Strategy 2: Parse limit from error message
+                        numbers = re.findall(r'[\d.]+', error_msg)
+                        for num_str in numbers:
+                            try:
+                                parsed_num = float(num_str)
+                                if 10 < parsed_num < current_notional:  # Sanity check
+                                    current_notional = parsed_num * 0.85  # 85% of limit
+                                    current_amount = current_notional / price
+                                    logger.warning(
+                                        f"⚠️ [RISK-RETRY] Sizing to 85% of parsed limit: "
+                                        f"${current_notional:.2f} (attempt {attempt + 2}/{max_retries + 1})"
+                                    )
+                                    break
+                            except ValueError:
+                                continue
+                        else:
+                            # Strategy 3: Progressive reduction
+                            reduction = 0.6 if attempt == 0 else 0.5  # 40% then 50% reduction
+                            current_notional *= reduction
+                            current_amount = current_notional / price
+                            logger.warning(
+                                f"⚠️ [RISK-RETRY] Reducing by {int((1-reduction)*100)}%: "
+                                f"${current_notional:.2f} (attempt {attempt + 2}/{max_retries + 1})"
+                            )
+                        continue
+
+                    # Non-retryable error or max retries reached
+                    logger.error(f"❌ Order failed for {symbol}: {error_msg[:200]}")
+                    return {
+                        'success': False,
+                        'action': action,
+                        'symbol': symbol,
+                        'error': order.get('error', 'Order execution failed')
+                    }
+
+                # API returned orderId - but this does NOT mean the order filled!
+                # The exchange may reject it post-acceptance due to margin issues
+                if order and 'orderId' in order:
+                    logger.info(f"📝 Order accepted by API: {order.get('orderId')} - verifying fill...")
+
+                    # CRITICAL: Verify the order actually filled by checking position change
+                    expected_change = current_amount if is_buy else -current_amount
+                    verify_result = await self.sdk.verify_order_fill(
+                        symbol=symbol,
+                        expected_change=expected_change,
+                        position_before=position_before,
+                        max_wait_seconds=3.0
+                    )
+
+                    if verify_result.get('filled'):
+                        # Order actually filled!
+                        if attempt > 0:
+                            logger.info(f"✅ Order FILLED after {attempt + 1} attempts (adjusted: ${current_notional:.2f})")
+                        else:
+                            logger.info(f"✅ Order FILLED: {symbol} {action} {current_amount:.6f}")
+
+                        # Record in tracker
+                        self.tracker.log_entry(
+                            order_id=order.get('orderId'),
+                            symbol=symbol,
+                            side=action.lower(),
+                            entry_price=price,
+                            size=current_amount,
+                            notes=reason
+                        )
+
+                        return {
+                            'success': True,
+                            'action': action,
+                            'symbol': symbol,
+                            'price': price,
+                            'amount': current_amount,
+                            'order': order
+                        }
+                    else:
+                        # Order was accepted but NOT filled - likely margin rejection
+                        logger.error(f"❌ Order NOT FILLED for {symbol}: {verify_result.get('error', 'unknown')}")
+
+                        # Treat this as a margin error and retry with smaller size
+                        if attempt < max_retries:
+                            # Progressive reduction
+                            reduction = 0.5  # 50% reduction
+                            current_notional *= reduction
+                            current_amount = current_notional / price
+                            # Update position_before for next attempt
+                            position_before = await self.sdk.get_position_size(symbol)
+                            logger.warning(
+                                f"⚠️ [FILL-FAILED] Reducing size by 50%: "
+                                f"${current_notional:.2f} (attempt {attempt + 2}/{max_retries + 1})"
+                            )
+                            continue
+
+                        # Max retries reached
+                        return {
+                            'success': False,
+                            'action': action,
+                            'symbol': symbol,
+                            'error': 'Order accepted but not filled - margin likely insufficient'
+                        }
+                else:
+                    # Unexpected response format
+                    logger.error(f"❌ Unexpected order response for {symbol}: {order}")
+                    return {
+                        'success': False,
+                        'action': action,
+                        'symbol': symbol,
+                        'error': f'Unexpected response: {order}'
+                    }
+
+            # All retries exhausted
+            logger.error(f"❌ Order failed after {max_retries + 1} attempts - risk limit for {symbol}")
+            return {
+                'success': False,
+                'action': action,
+                'symbol': symbol,
+                'error': 'Risk limit exceeded after retries'
+            }
 
         except Exception as e:
             logger.error(f"❌ Error opening position for {symbol}: {e}")

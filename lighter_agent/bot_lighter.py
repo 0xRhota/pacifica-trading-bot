@@ -24,6 +24,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Reuse Pacifica bot's LLM system (same structure)
 from llm_agent.llm import LLMTradingAgent
+from llm_agent.self_learning import SelfLearning
 from trade_tracker import TradeTracker
 from dexes.lighter.lighter_sdk import LighterSDK
 from lighter_agent.execution.lighter_executor import LighterTradeExecutor
@@ -124,6 +125,10 @@ class LighterTradingBot:
         self.lighter_sdk = None  # Will be initialized in async context
 
         self.trade_tracker = TradeTracker(dex="lighter")
+
+        # Initialize self-learning module
+        self.self_learning = SelfLearning(self.trade_tracker, min_trades_for_insight=5)
+        logger.info("✅ Self-learning module initialized")
 
         # Store executor params (will initialize after SDK)
         self.executor = None
@@ -513,6 +518,11 @@ class LighterTradingBot:
             # (prompt_version already fetched above when checking macro context)
 
             # Build kwargs based on prompt version
+            # Generate self-learning insights
+            learning_context = self.self_learning.generate_learning_context(hours=168)  # Last 7 days
+            if learning_context:
+                logger.info("📚 Self-learning insights generated from past trades")
+
             prompt_kwargs = {
                 "market_table": market_table,
                 "open_positions": open_positions,
@@ -521,7 +531,8 @@ class LighterTradingBot:
                 "trade_history": trade_history,
                 "recently_closed_symbols": recently_closed or [],
                 "dex_name": "Lighter",  # Tell prompt formatter to use Lighter-specific instructions
-                "analyzed_tokens": lighter_symbols  # Pass symbol list for prompt
+                "analyzed_tokens": lighter_symbols,  # Pass symbol list for prompt
+                "learning_context": learning_context  # Self-learning insights
             }
 
             # V1 uses macro_context and deep42_context, V2 doesn't

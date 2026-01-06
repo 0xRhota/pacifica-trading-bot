@@ -1,0 +1,690 @@
+#!/usr/bin/env python3
+"""
+Grid Market Maker v8 - LIVE on Paradex
+$23 Account - Real Order Placement
+
+Strategy: Place limit orders on both sides of mid price
+- Earns spread + maker rebates (-0.005%)
+- Uses v8 parameters proven profitable in paper trading
+
+v8 Winning Parameters (proven +$1.81 per $10k):
+- Spread: 1.5 bps
+- ROC threshold: 1.0 bps (trend detection)
+- Pause duration: 15 seconds
+- Inventory limit: 25%
+
+Reference: research/strategies/GRID_MM_EVOLUTION.md
+Reference: research/LEARNINGS.md
+"""
+
+import os
+import sys
+import time
+import asyncio
+import logging
+from decimal import Decimal
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional
+from collections import deque
+from dotenv import load_dotenv
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(project_root, '.env'))
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s | %(message)s',
+    datefmt='%H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
+from paradex_py import ParadexSubkey
+from paradex_py.common.order import Order, OrderType, OrderSide
+
+
+class GridMarketMakerLive:
+    """
+    Live Grid Market Maker for Paradex
+    Places actual limit orders on exchange
+    """
+
+    def __init__(
+        self,
+        symbol: str = "BTC-USD-PERP",
+        base_spread_bps: float = 1.5,      # v8: Keep tight
+        order_size_usd: float = 5.0,       # $5 per order for $23 account
+        num_levels: int = 3,               # Fewer levels for small account
+        duration_minutes: int = 60,
+        max_inventory_pct: float = 25.0,   # v8: 25% max inventory
+        capital: float = 23.0,
+        roc_threshold_bps: float = 1.0,    # v8: 1.0 bps trend threshold
+        min_pause_duration: int = 15,      # v8: 15 second pause
+    ):
+        self.symbol = symbol
+        self.base_spread_bps = base_spread_bps
+        self.order_size_usd = order_size_usd
+        self.num_levels = num_levels
+        self.duration_minutes = duration_minutes
+        self.max_inventory_pct = max_inventory_pct
+        self.capital = capital
+        self.roc_threshold_bps = roc_threshold_bps
+        self.min_pause_duration = min_pause_duration
+
+        # State
+        self.client = None
+        self.grid_center = None
+        self.open_orders: Dict[str, Dict] = {}  # order_id -> order info
+        self.price_history: deque = deque(maxlen=30)
+
+        # Trend detection
+        self.orders_paused = False
+        self.pause_side = None
+        self.pause_start_time = None
+
+        # Stats
+        self.total_volume = 0.0
+        self.realized_pnl = 0.0
+        self.fills_count = 0
+        self.start_time = None
+        self.initial_balance = 0.0
+        self.current_balance = 0.0
+
+        # Position tracking
+        self.position_size = 0.0
+        self.position_notional = 0.0
+
+        # Market info
+        self.tick_size = 1.0  # BTC tick size
+        self.step_size = 0.0001  # BTC step size
+        self.min_notional = 10.0  # Paradex minimum order notional
+
+    def initialize(self):
+        """Initialize Paradex client with authentication"""
+        logger.info("=" * 70)
+        logger.info("GRID MARKET MAKER v8 - LIVE TRADING")
+        logger.info("=" * 70)
+        logger.info(f"Symbol: {self.symbol}")
+        logger.info(f"Spread: {self.base_spread_bps} bps")
+        logger.info(f"Order Size: ${self.order_size_usd}")
+        logger.info(f"Levels: {self.num_levels} per side")
+        logger.info(f"Capital: ${self.capital}")
+        logger.info(f"Max Inventory: {self.max_inventory_pct}%")
+        logger.info(f"ROC Threshold: {self.roc_threshold_bps} bps")
+        logger.info(f"Min Pause: {self.min_pause_duration}s")
+        logger.info("=" * 70)
+
+        # Initialize authenticated client
+        private_key = os.getenv("PARADEX_PRIVATE_SUBKEY")
+        if not private_key:
+            raise ValueError("PARADEX_PRIVATE_SUBKEY not set in .env")
+
+        logger.info("Connecting to Paradex...")
+        self.client = ParadexSubkey(
+            env='prod',
+            l2_private_key=private_key,
+            l2_address=os.getenv('PARADEX_ACCOUNT_ADDRESS'),
+        )
+
+        # Get account balance
+        account = self.client.api_client.fetch_account_summary()
+        self.initial_balance = float(account.account_value)
+        self.current_balance = self.initial_balance
+        logger.info(f"Account balance: ${self.initial_balance:.2f}")
+
+        if self.initial_balance < self.capital:
+            logger.warning(f"Account balance ${self.initial_balance:.2f} < expected ${self.capital}")
+            self.capital = self.initial_balance
+
+        # Get market info
+        markets = self.client.api_client.fetch_markets()
+        for m in markets.get('results', []):
+            if m.get('symbol') == self.symbol:
+                self.tick_size = float(m.get('price_tick_size', 1.0))
+                self.step_size = float(m.get('order_size_increment', 0.0001))
+                self.min_notional = float(m.get('min_notional', 10))
+                logger.info(f"Market: tick={self.tick_size}, step={self.step_size}, min_notional=${self.min_notional}")
+                break
+
+        # Get current price
+        bbo = self.client.api_client.fetch_bbo(market=self.symbol)
+        if not bbo:
+            raise Exception(f"Cannot fetch BBO for {self.symbol}")
+
+        bid = float(bbo['bid'])
+        ask = float(bbo['ask'])
+        mid = (bid + ask) / 2
+        logger.info(f"Initial price: ${mid:,.2f} (bid: ${bid:,.2f}, ask: ${ask:,.2f})")
+
+        self.grid_center = mid
+        self.price_history.append(mid)
+        self.start_time = datetime.now()
+
+        # Check existing positions
+        self._sync_position()
+
+        # TASK 8: Close any existing position before starting fresh grid
+        if self.position_size != 0:
+            logger.warning("=" * 70)
+            logger.warning("EXISTING POSITION DETECTED - CLOSING BEFORE GRID START")
+            logger.warning("=" * 70)
+            self._close_all_positions()
+            self._sync_position()
+
+        return True
+
+    def _sync_position(self):
+        """Sync position from exchange"""
+        try:
+            positions = self.client.api_client.fetch_positions()
+            self.position_size = 0.0
+            self.position_notional = 0.0
+
+            if positions and positions.get('results'):
+                for pos in positions['results']:
+                    if pos.get('market') == self.symbol:
+                        size = float(pos.get('size', 0))
+                        if size != 0:
+                            self.position_size = size
+                            entry = float(pos.get('average_entry_price', 0))
+                            # SIGNED notional: positive for long, negative for short
+                            self.position_notional = size * entry
+                            side = 'LONG' if size > 0 else 'SHORT'
+                            logger.info(f"Existing position: {side} {abs(size):.6f} @ ${entry:,.2f} (${abs(self.position_notional):,.2f})")
+        except Exception as e:
+            logger.error(f"Position sync error: {e}")
+
+    def _close_all_positions(self):
+        """
+        TASK 8: Close any existing position with a market order
+        This prevents inheriting losing positions from previous runs
+        """
+        try:
+            if self.position_size == 0:
+                logger.info("No position to close")
+                return
+
+            side = 'LONG' if self.position_size > 0 else 'SHORT'
+            abs_size = abs(self.position_size)
+
+            logger.info(f"Closing {side} position: {abs_size:.6f} BTC")
+
+            # Market order to close - opposite side
+            close_side = OrderSide.Sell if self.position_size > 0 else OrderSide.Buy
+
+            order = Order(
+                market=self.symbol,
+                order_type=OrderType.Market,
+                order_side=close_side,
+                size=self._round_size(abs_size),
+                client_id=f"close_pos_{int(time.time())}",
+            )
+
+            result = self.client.api_client.submit_order(order)
+            if result.get('status') in ['NEW', 'OPEN', 'CLOSED']:
+                fill_price = float(result.get('avg_fill_price', 0))
+                logger.info(f"  Position closed @ ${fill_price:,.2f}")
+                self.position_size = 0.0
+                self.position_notional = 0.0
+            else:
+                logger.error(f"  Close order rejected: {result}")
+
+        except Exception as e:
+            logger.error(f"Close position error: {e}")
+
+    def _round_price(self, price: float) -> Decimal:
+        """Round price to tick size"""
+        tick_dec = Decimal(str(self.tick_size))
+        price_dec = Decimal(str(price))
+        # Round to nearest tick
+        rounded = (price_dec / tick_dec).quantize(Decimal('1')) * tick_dec
+        return rounded
+
+    def _round_size(self, size: float) -> Decimal:
+        """Round size to step size"""
+        step_dec = Decimal(str(self.step_size))
+        size_dec = Decimal(str(size))
+        # Round down to step size
+        rounded = (size_dec / step_dec).quantize(Decimal('1'), rounding='ROUND_DOWN') * step_dec
+        return max(rounded, step_dec)
+
+    def _calculate_roc(self) -> float:
+        """Calculate Rate of Change in bps"""
+        if len(self.price_history) < 10:
+            return 0.0
+
+        prices = list(self.price_history)
+        current = prices[-1]
+        past = prices[-10]
+
+        if past == 0:
+            return 0.0
+
+        return (current - past) / past * 10000
+
+    def _update_pause_state(self, roc: float):
+        """
+        TASK 10: Update order pause state based on trend
+        IMPROVED: Pause ALL grid activity during strong trends (not just one side)
+        This prevents adverse selection where we get filled against the trend
+        """
+        old_paused = self.orders_paused
+        old_side = self.pause_side
+
+        # TASK 10: Strong trend threshold (2x normal) pauses ALL grid activity
+        strong_trend_threshold = self.roc_threshold_bps * 2.0  # 2.0 bps
+
+        if abs(roc) > strong_trend_threshold:
+            # STRONG TREND - pause ALL orders to avoid adverse selection
+            if not self.orders_paused or self.pause_side != 'ALL':
+                self.pause_start_time = datetime.now()
+            self.orders_paused = True
+            self.pause_side = 'ALL'
+            direction = "UP" if roc > 0 else "DOWN"
+            if not old_paused or old_side != 'ALL':
+                logger.warning(f"  ⚡ STRONG TREND {direction} - PAUSE ALL GRID (ROC: {roc:+.2f} bps)")
+        elif roc > self.roc_threshold_bps:
+            # Uptrend - pause SELL orders (we don't want to sell into rallies)
+            if not self.orders_paused or self.pause_side != 'SELL':
+                self.pause_start_time = datetime.now()
+            self.orders_paused = True
+            self.pause_side = 'SELL'
+        elif roc < -self.roc_threshold_bps:
+            # Downtrend - pause BUY orders (we don't want to buy into dumps)
+            if not self.orders_paused or self.pause_side != 'BUY':
+                self.pause_start_time = datetime.now()
+            self.orders_paused = True
+            self.pause_side = 'BUY'
+        else:
+            # Check if min pause duration met
+            if self.orders_paused and self.pause_start_time:
+                elapsed = (datetime.now() - self.pause_start_time).total_seconds()
+                if elapsed >= self.min_pause_duration:
+                    self.orders_paused = False
+                    self.pause_side = None
+                    self.pause_start_time = None
+            else:
+                self.orders_paused = False
+                self.pause_side = None
+
+        # Log state changes (non-ALL)
+        if self.orders_paused and not old_paused and self.pause_side != 'ALL':
+            logger.info(f"  PAUSE {self.pause_side} orders (ROC: {roc:+.2f} bps)")
+        elif not self.orders_paused and old_paused:
+            logger.info(f"  RESUME orders (ROC: {roc:+.2f} bps)")
+
+    def _cancel_all_orders(self):
+        """Cancel all open orders"""
+        try:
+            orders = self.client.api_client.fetch_orders(params={'market': self.symbol})
+            if orders and orders.get('results'):
+                for order in orders['results']:
+                    if order.get('status') in ['NEW', 'OPEN', 'UNTRIGGERED']:
+                        order_id = order.get('id')
+                        try:
+                            self.client.api_client.cancel_order(order_id=order_id)
+                        except Exception as e:
+                            logger.debug(f"Cancel error for {order_id}: {e}")
+            self.open_orders.clear()
+        except Exception as e:
+            logger.error(f"Cancel all orders error: {e}")
+
+    def _place_grid_orders(self, mid_price: float):
+        """
+        Place grid of limit orders
+
+        TASK 9: IMPROVED INVENTORY SKEW LOGIC
+        When heavily positioned, ONLY place orders that REDUCE the position.
+        This prevents adverse selection (adding to losers).
+        """
+        # First cancel existing orders
+        self._cancel_all_orders()
+
+        # TASK 10: If ALL orders paused due to strong trend, don't place anything
+        if self.orders_paused and self.pause_side == 'ALL':
+            logger.info(f"  Grid SKIPPED: Strong trend detected, all orders paused")
+            return
+
+        spread_pct = self.base_spread_bps / 10000
+        max_inventory = self.capital * (self.max_inventory_pct / 100)
+
+        # Calculate inventory ratio (signed: positive=long, negative=short)
+        inv_ratio = self.position_notional / max_inventory if max_inventory > 0 else 0
+
+        # TASK 9: IMPROVED INVENTORY MANAGEMENT
+        # When heavily positioned (>30% of max), ONLY place orders that REDUCE position
+        # This is the KEY fix - don't place orders that could ADD to losing positions
+
+        buy_mult = 1.0
+        sell_mult = 1.0
+        inventory_mode = "BALANCED"
+
+        # Calculate minimum multiplier to stay above min notional
+        min_mult = self.min_notional / self.order_size_usd if self.order_size_usd > 0 else 1.0
+
+        if inv_ratio > 0.7:  # Heavy LONG - ONLY place sells to reduce
+            inventory_mode = "REDUCE_LONG"
+            buy_mult = 0.0  # No buys! Would add to long
+            sell_mult = 1.5  # Aggressive sells to reduce
+            logger.info(f"  📉 REDUCE LONG MODE: {inv_ratio*100:.0f}% inventory - sells only")
+        elif inv_ratio > 0.3:  # Moderate long - reduce buys, increase sells
+            buy_mult = max(min_mult, 0.3)
+            sell_mult = 1.3
+        elif inv_ratio < -0.7:  # Heavy SHORT - ONLY place buys to reduce
+            inventory_mode = "REDUCE_SHORT"
+            buy_mult = 1.5  # Aggressive buys to reduce
+            sell_mult = 0.0  # No sells! Would add to short
+            logger.info(f"  📈 REDUCE SHORT MODE: {inv_ratio*100:.0f}% inventory - buys only")
+        elif inv_ratio < -0.3:  # Moderate short - reduce sells, increase buys
+            buy_mult = 1.3
+            sell_mult = max(min_mult, 0.3)
+
+        orders_placed = 0
+
+        # Place BUY orders (below mid) - skip if paused
+        if not (self.orders_paused and self.pause_side == 'BUY') and buy_mult > 0:
+            for i in range(1, self.num_levels + 1):
+                price = mid_price * (1 - spread_pct * i)
+                price_dec = self._round_price(price)
+
+                # Calculate order size with multiplier applied
+                target_notional = self.order_size_usd * buy_mult
+
+                # ENFORCE MINIMUM NOTIONAL - skip if below limit
+                if target_notional < self.min_notional:
+                    logger.debug(f"  Skip BUY L{i}: ${target_notional:.2f} < ${self.min_notional} min")
+                    continue
+
+                size = target_notional / float(price_dec)
+                size_dec = self._round_size(size)
+
+                # Verify final notional after rounding
+                actual_notional = float(price_dec) * float(size_dec)
+                if actual_notional < self.min_notional:
+                    logger.debug(f"  Skip BUY L{i}: rounded ${actual_notional:.2f} < ${self.min_notional} min")
+                    continue
+
+                # Skip if would exceed inventory limit (BUY increases position toward positive)
+                # position_notional is signed: positive=long, negative=short
+                potential = self.position_notional + actual_notional
+                if potential > max_inventory:
+                    logger.debug(f"  Skip BUY L{i}: ${potential:.2f} would exceed ${max_inventory:.2f} limit")
+                    continue
+
+                try:
+                    order = Order(
+                        market=self.symbol,
+                        order_type=OrderType.Limit,
+                        order_side=OrderSide.Buy,
+                        size=size_dec,
+                        limit_price=price_dec,
+                        client_id=f"grid_buy_{i}_{int(time.time())}",
+                    )
+                    result = self.client.api_client.submit_order(order)
+                    if result.get('status') in ['NEW', 'OPEN']:
+                        self.open_orders[result.get('id')] = {
+                            'side': 'BUY',
+                            'price': float(price_dec),
+                            'size': float(size_dec),
+                            'level': i
+                        }
+                        orders_placed += 1
+                    else:
+                        logger.warning(f"BUY order rejected: {result}"[:100])
+                except Exception as e:
+                    logger.warning(f"BUY error L{i}: size={size_dec} price={price_dec}: {e}"[:100])
+
+        # Place SELL orders (above mid) - skip if paused
+        if not (self.orders_paused and self.pause_side == 'SELL') and sell_mult > 0:
+            for i in range(1, self.num_levels + 1):
+                price = mid_price * (1 + spread_pct * i)
+                price_dec = self._round_price(price)
+
+                # Calculate order size with multiplier applied
+                target_notional = self.order_size_usd * sell_mult
+
+                # ENFORCE MINIMUM NOTIONAL - skip if below limit
+                if target_notional < self.min_notional:
+                    logger.debug(f"  Skip SELL L{i}: ${target_notional:.2f} < ${self.min_notional} min")
+                    continue
+
+                size = target_notional / float(price_dec)
+                size_dec = self._round_size(size)
+
+                # Verify final notional after rounding
+                actual_notional = float(price_dec) * float(size_dec)
+                if actual_notional < self.min_notional:
+                    logger.debug(f"  Skip SELL L{i}: rounded ${actual_notional:.2f} < ${self.min_notional} min")
+                    continue
+
+                # Skip if would exceed inventory limit (SELL decreases position toward negative)
+                # position_notional is signed: positive=long, negative=short
+                potential = self.position_notional - actual_notional
+                if potential < -max_inventory:
+                    logger.debug(f"  Skip SELL L{i}: ${potential:.2f} would exceed -${max_inventory:.2f} limit")
+                    continue
+
+                try:
+                    order = Order(
+                        market=self.symbol,
+                        order_type=OrderType.Limit,
+                        order_side=OrderSide.Sell,
+                        size=size_dec,
+                        limit_price=price_dec,
+                        client_id=f"grid_sell_{i}_{int(time.time())}",
+                    )
+                    result = self.client.api_client.submit_order(order)
+                    if result.get('status') in ['NEW', 'OPEN']:
+                        self.open_orders[result.get('id')] = {
+                            'side': 'SELL',
+                            'price': float(price_dec),
+                            'size': float(size_dec),
+                            'level': i
+                        }
+                        orders_placed += 1
+                    else:
+                        logger.warning(f"SELL order rejected: {result}"[:100])
+                except Exception as e:
+                    logger.warning(f"SELL error L{i}: size={size_dec} price={price_dec}: {e}"[:100])
+
+        self.grid_center = mid_price
+        if orders_placed > 0:
+            logger.info(f"  Grid: {orders_placed} orders placed around ${mid_price:,.2f}")
+
+    def _check_fills(self) -> int:
+        """Check for filled orders and update stats"""
+        fills = 0
+        try:
+            orders = self.client.api_client.fetch_orders(params={'market': self.symbol})
+            if orders and orders.get('results'):
+                for order in orders['results']:
+                    order_id = order.get('id')
+                    if order_id in self.open_orders and order.get('status') == 'CLOSED':
+                        # Order filled!
+                        info = self.open_orders[order_id]
+                        filled_size = float(order.get('filled_size', 0))
+                        fill_price = float(order.get('avg_fill_price', info['price']))
+
+                        notional = filled_size * fill_price
+                        self.total_volume += notional
+                        self.fills_count += 1
+                        fills += 1
+
+                        logger.info(f"  FILL: {info['side']} {filled_size:.6f} @ ${fill_price:,.2f} (${notional:,.2f})")
+                        del self.open_orders[order_id]
+
+        except Exception as e:
+            logger.error(f"Check fills error: {e}")
+
+        return fills
+
+    def run(self):
+        """Main trading loop"""
+        try:
+            if not self.initialize():
+                return
+
+            end_time = self.start_time + timedelta(minutes=self.duration_minutes)
+            cycle = 0
+            grid_reset_pct = 0.25  # Reset grid on 0.25% price move (matches v8 paper trading)
+
+            logger.info(f"\nStarting live trading until {end_time.strftime('%H:%M:%S')}...")
+            logger.info("-" * 70)
+
+            # Place initial grid
+            self._place_grid_orders(self.grid_center)
+
+            while datetime.now() < end_time:
+                cycle += 1
+
+                # Get current BBO
+                try:
+                    bbo = self.client.api_client.fetch_bbo(market=self.symbol)
+                except Exception as e:
+                    logger.warning(f"BBO error: {e}")
+                    time.sleep(2)
+                    continue
+
+                if not bbo:
+                    time.sleep(1)
+                    continue
+
+                bid = float(bbo['bid'])
+                ask = float(bbo['ask'])
+                mid = (bid + ask) / 2
+                spread_bps = (ask - bid) / mid * 10000
+
+                self.price_history.append(mid)
+
+                # Calculate ROC and update pause state
+                roc = self._calculate_roc()
+                self._update_pause_state(roc)
+
+                # Check for fills
+                fills = self._check_fills()
+
+                # Refresh grid on price move or fills (matches v8 paper trading logic)
+                price_move_pct = abs(mid - self.grid_center) / self.grid_center * 100 if self.grid_center else 0
+
+                # Calculate inventory ratio for force reset
+                max_inventory = self.capital * (self.max_inventory_pct / 100)
+                inventory_ratio = abs(self.position_notional) / max_inventory if max_inventory > 0 else 0
+
+                should_refresh = (
+                    fills > 0 or
+                    price_move_pct >= grid_reset_pct or  # 0.25% price move (v8 behavior)
+                    inventory_ratio > 0.8  # Inventory force reset at 80%
+                )
+
+                if should_refresh:
+                    if price_move_pct >= grid_reset_pct:
+                        logger.info(f"  Grid reset: price moved {price_move_pct:.3f}%")
+                    elif inventory_ratio > 0.8:
+                        logger.info(f"  Grid reset: inventory at {inventory_ratio*100:.0f}%")
+                    self._sync_position()
+                    self._place_grid_orders(mid)
+
+                # Status log every 30 seconds
+                if cycle % 30 == 0:
+                    # Update balance
+                    try:
+                        account = self.client.api_client.fetch_account_summary()
+                        self.current_balance = float(account.account_value)
+                    except:
+                        pass
+
+                    pnl = self.current_balance - self.initial_balance
+                    elapsed = (datetime.now() - self.start_time).total_seconds() / 60
+                    inv_pct = abs(self.position_notional) / self.capital * 100 if self.capital > 0 else 0
+                    pause_status = f"PAUSE-{self.pause_side}" if self.orders_paused else "LIVE"
+
+                    logger.info(f"\n[{elapsed:.1f}m] ${mid:,.2f} | Spread: {spread_bps:.1f}bps | ROC: {roc:+.1f}bps | {pause_status}")
+                    logger.info(f"  Position: {self.position_size:.6f} BTC ({inv_pct:.0f}% inv)")
+                    logger.info(f"  Volume: ${self.total_volume:,.2f} | Fills: {self.fills_count}")
+                    logger.info(f"  P&L: ${pnl:+.2f} (${self.current_balance:.2f})")
+
+                    if self.total_volume > 0:
+                        profit_per_10k = pnl / self.total_volume * 10000
+                        logger.info(f"  Efficiency: ${profit_per_10k:+.2f} per $10k vol")
+
+                time.sleep(1)
+
+        except KeyboardInterrupt:
+            logger.info("\nStopping by user request...")
+        except Exception as e:
+            logger.error(f"Error: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            # Cleanup
+            logger.info("\nCleaning up - canceling open orders...")
+            self._cancel_all_orders()
+            self._print_report()
+
+    def _print_report(self):
+        """Print final report"""
+        # Update final balance
+        try:
+            account = self.client.api_client.fetch_account_summary()
+            self.current_balance = float(account.account_value)
+        except:
+            pass
+
+        elapsed = (datetime.now() - self.start_time).total_seconds() / 60 if self.start_time else 0
+        pnl = self.current_balance - self.initial_balance
+
+        logger.info("\n" + "=" * 70)
+        logger.info("GRID MM v8 LIVE - FINAL REPORT")
+        logger.info("=" * 70)
+        logger.info(f"Duration: {elapsed:.1f} minutes")
+        logger.info(f"Total Volume: ${self.total_volume:,.2f}")
+        logger.info(f"Total Fills: {self.fills_count}")
+        logger.info(f"Start Balance: ${self.initial_balance:.2f}")
+        logger.info(f"End Balance: ${self.current_balance:.2f}")
+        logger.info(f"P&L: ${pnl:+.2f} ({pnl/self.initial_balance*100:+.2f}%)")
+
+        if self.total_volume > 0:
+            profit_per_10k = pnl / self.total_volume * 10000
+            logger.info(f"Profit per $10k volume: ${profit_per_10k:+.2f}")
+            # Include rebates earned (-0.005% maker rebate)
+            rebates = self.total_volume * 0.00005
+            logger.info(f"Estimated rebates earned: ${rebates:.4f}")
+
+        logger.info("=" * 70)
+
+        # Save results
+        os.makedirs('logs', exist_ok=True)
+        with open('logs/grid_mm_live_results.txt', 'a') as f:
+            f.write(f"\n--- {datetime.now()} ---\n")
+            f.write(f"Duration: {elapsed:.1f} min\n")
+            f.write(f"Volume: ${self.total_volume:,.2f}\n")
+            f.write(f"Fills: {self.fills_count}\n")
+            f.write(f"P&L: ${pnl:+.2f}\n")
+            if self.total_volume > 0:
+                f.write(f"Per $10k: ${profit_per_10k:+.2f}\n")
+
+
+def main():
+    """
+    LIVE Grid MM v8 for $23 Paradex account
+
+    Parameters scaled from $1000 test that achieved +$1.81 per $10k
+    NOTE: Paradex min notional = $10, using $12 per order
+    """
+    mm = GridMarketMakerLive(
+        symbol="BTC-USD-PERP",
+        base_spread_bps=1.5,        # v8: Keep tight
+        order_size_usd=15.0,        # $15 per order (safely above $10 min)
+        num_levels=1,               # 1 level per side (small account)
+        duration_minutes=525600,    # Run indefinitely (1 year)
+        max_inventory_pct=50.0,     # 50% for small account
+        capital=23.0,               # $23 account
+        roc_threshold_bps=1.0,      # v8: 1.0 bps trend detection
+        min_pause_duration=15,      # v8: 15s pause duration
+    )
+    mm.run()
+
+
+if __name__ == "__main__":
+    main()
