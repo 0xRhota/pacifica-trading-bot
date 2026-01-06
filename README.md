@@ -161,35 +161,40 @@ The **strategy** determines:
 
 ## Data Sources
 
-The bots aggregate data from multiple sources. **Full reference: [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md)**
+**Full reference: [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md)**
 
-### Market Data (Per Exchange)
+### Exchange APIs
 
-| Data | Source | Update Frequency |
-|------|--------|------------------|
-| Price | Exchange API | Each cycle |
-| Volume (24h) | Exchange API | Each cycle |
-| Funding Rate | Exchange API | Each cycle |
-| Open Interest | Exchange API | Each cycle |
+| Exchange | API Base URL | Docs |
+|----------|--------------|------|
+| Hibachi | `https://api.hibachi.xyz` | — |
+| Hibachi (data) | `https://data-api.hibachi.xyz` | — |
+| Lighter | `https://mainnet.zklighter.elliot.ai` | [apidocs.lighter.xyz](https://apidocs.lighter.xyz) |
+| Extended | `https://api.starknet.extended.exchange/api/v1` | — |
+| Paradex | `paradex-py` SDK | [docs.paradex.trade](https://docs.paradex.trade) |
+| Pacifica | `https://api.pacifica.fi/api/v1` | [docs.pacifica.fi](https://docs.pacifica.fi) |
 
-### Technical Indicators (Calculated Locally)
+Each exchange provides: price, volume, funding rate, open interest.
 
-| Indicator | Calculation | Purpose |
-|-----------|-------------|---------|
-| RSI | 14-period relative strength | Overbought/oversold |
-| MACD | 12/26/9 EMA crossover | Trend momentum |
-| EMA | Exponential moving average | Trend direction |
-| SMA | Simple moving average | Baseline trend |
+### Technical Indicators
 
-### External Data (Optional)
+Calculated locally using `pandas_ta`:
 
-| Source | Endpoint | Purpose |
+| Indicator | Parameters | File |
+|-----------|------------|------|
+| RSI | 14-period | `llm_agent/data/indicators.py` |
+| MACD | 12/26/9 EMA | `llm_agent/data/indicators.py` |
+| EMA/SMA | Configurable | `llm_agent/data/indicators.py` |
+
+### External Data
+
+| Source | Base URL | Purpose |
 |--------|----------|---------|
-| Cambrian Deep42 | `deep42.cambrian.network` | AI sentiment analysis |
-| Fear & Greed Index | Alternative.me | Market sentiment |
-| Funding Rates (Cross-Exchange) | Various | Arbitrage signals |
+| Cambrian Deep42 | `https://deep42.cambrian.network/api/v1` | AI sentiment ([docs](https://docs.cambrian.org)) |
+| Binance Funding | `https://fapi.binance.com/fapi/v1/fundingRate` | Cross-exchange funding |
+| Bybit Funding | `https://api.bybit.com/v5/market/funding/history` | Cross-exchange funding |
 
-**Implementation**: `llm_agent/data/` directory contains all data fetchers.
+**Data fetchers**: `llm_agent/data/` directory
 
 ---
 
