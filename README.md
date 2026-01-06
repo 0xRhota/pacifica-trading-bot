@@ -78,32 +78,50 @@ python3 scripts/grid_mm_live.py
 
 ## Strategies
 
+Strategies are modular Python classes that control how the bot makes decisions. Each strategy lives in `{exchange}_agent/execution/strategy_{flag}_{name}.py`.
+
 **Full documentation: [docs/STRATEGIES.md](docs/STRATEGIES.md)**
 
-### Quick Reference
+### Available Strategies
 
-| Flag | Name | Description |
-|------|------|-------------|
-| `F` | Self-improving | Learns from outcomes, auto-blocks losing patterns |
-| `D` | Pairs trade | Long one asset, short another (ETH/BTC) |
-| `G` | Low-liq hunter | Targets volatile pairs with trailing stops |
-| `A` | Hard exits | Fixed TP/SL rules override LLM decisions |
-| `C` | Copy whale | Mirrors specific wallet positions |
+| Flag | Name | File | Description |
+|------|------|------|-------------|
+| `F` | Self-improving | `strategy_f_self_improving.py` | Tracks outcomes, auto-blocks losing patterns |
+| `D` | Pairs trade | `strategy_d_pairs_trade.py` | Long one asset, short another (ETH/BTC) |
+| `G` | Low-liq hunter | `strategy_g_low_liq_hunter.py` | Targets volatile pairs with trailing stops |
+| `A` | Hard exits | `strategy_a_exit_rules.py` | Fixed TP/SL rules override LLM |
+| `C` | Copy whale | `strategy_c_copy_whale.py` | Mirrors a specific wallet's positions |
 
-### Prompt System
+### Selecting a Strategy
 
-The LLM prompt determines how the bot interprets market data. Multiple prompt versions are included in `llm_agent/prompts_archive/` (v1 through v9+).
+```bash
+# Use --strategy flag
+python3 -m hibachi_agent.bot_hibachi --live --strategy F
 
-**Recommended starting point**: `v9_qwen_enhanced.txt`
-- Uses 5-signal scoring (RSI + MACD + Volume + Price Action + OI)
-- Requires score >= 3.0 to open positions
-- Targets 3:1 risk/reward ratio
+# Default (no flag) runs without strategy overlay
+python3 -m hibachi_agent.bot_hibachi --live
+```
 
-You can modify existing prompts or create your own. The bot loads prompts from this directory.
+### How Strategies Work
+
+1. **The LLM decides** what to trade based on market data + prompt
+2. **The strategy filters/modifies** that decision (block symbols, enforce exits, etc.)
+3. **The executor** places orders on the exchange
+
+Strategies can override LLM decisions. For example, Strategy A ignores LLM exit suggestions and uses hard TP/SL rules instead.
+
+### Prompts
+
+The LLM prompt determines how market data is interpreted. Prompts live in `llm_agent/prompts_archive/`.
+
+| Prompt | Approach |
+|--------|----------|
+| `v9_qwen_enhanced.txt` | 5-signal scoring, 3:1 R:R (recommended) |
+| `v1-v8` | Earlier iterations (see [STRATEGIES.md](docs/STRATEGIES.md#prompt-history)) |
 
 ### Grid Market Making
 
-`scripts/grid_mm_live.py` implements grid market making on Paradex:
+A separate market-making strategy for Paradex: `scripts/grid_mm_live.py`
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -111,7 +129,7 @@ You can modify existing prompts or create your own. The bot loads prompts from t
 | `pause_duration` | 15 | Seconds to pause after fills |
 | `inventory_limit` | 25% | Max position as % of account |
 
-**Evolution history**: [research/strategies/GRID_MM_EVOLUTION.md](research/strategies/GRID_MM_EVOLUTION.md)
+See [research/strategies/GRID_MM_EVOLUTION.md](research/strategies/GRID_MM_EVOLUTION.md) for parameter tuning history.
 
 ---
 
