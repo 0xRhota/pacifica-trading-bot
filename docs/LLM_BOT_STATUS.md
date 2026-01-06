@@ -130,7 +130,7 @@ python -m llm_agent.bot_llm --live --interval 300
 CAMBRIAN_API_KEY=doug.ZbEScx8M4zlf7kDn
 DEEPSEEK_API_KEY=sk-...
 PACIFICA_API_KEY=<your_api_key>
-PACIFICA_ACCOUNT=8saejVsbEBraGvxbJGxrosv4QKMfR2i8f59GFAnMXfMc
+PACIFICA_ACCOUNT=YOUR_ACCOUNT_PUBKEY
 ```
 
 ---

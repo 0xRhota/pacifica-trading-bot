@@ -219,7 +219,7 @@ pgrep -f "bot_pacifica"   # Pacifica bot PID
    - Now returns real account_equity for dynamic position sizing
    - Falls back to None if API unavailable (executor has fallback logic)
 
-**API Data Retrieved** (8saejVsbEBraGvxbJGxrosv4QKMfR2i8f59GFAnMXfMc):
+**API Data Retrieved** (YOUR_ACCOUNT_PUBKEY):
 - Account Equity: $113.75
 - Balance: $113.67
 - Available to Spend: $106.26

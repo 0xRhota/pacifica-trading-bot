@@ -25,7 +25,7 @@ Then edit `.env` and fill in:
 
 ```bash
 SOLANA_PRIVATE_KEY=your_base58_private_key_here
-PACIFICA_ACCOUNT_ADDRESS=8saejVsbEBraGvxbJGxrosv4QKMfR2i8f59GFAnMXfMc
+PACIFICA_ACCOUNT_ADDRESS=YOUR_ACCOUNT_PUBKEY
 ```
 
 **IMPORTANT:**

@@ -41,7 +41,7 @@
 ## 🔍 Current State Analysis
 
 ### Pacifica Bot Status
-- **Account:** 8saejVsbEBraGvxbJGxrosv4QKMfR2i8f59GFAnMXfMc
+- **Account:** YOUR_ACCOUNT_PUBKEY
 - **Equity:** $113.23 (down from $113.75)
 - **Win Rate:** 6.1% (15 wins / 246 losses)
 - **Trading Frequency:** Every 5 minutes (288 checks/day)

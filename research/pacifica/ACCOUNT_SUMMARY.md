@@ -7,7 +7,7 @@
 
 ## Current Account Status
 
-**Account**: `8saejVsbEBraGvxbJGxrosv4QKMfR2i8f59GFAnMXfMc`
+**Account**: `YOUR_ACCOUNT_PUBKEY`
 
 | Metric | Value |
 |--------|-------|

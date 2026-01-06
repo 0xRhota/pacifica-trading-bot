@@ -12,7 +12,7 @@
 - **Location**: `pacifica_agent/bot_pacifica.py`
 - **Markets**: BTC, SOL, ETH, DOGE, etc.
 - **Fees**: Check with exchange
-- **Account**: `8saejVsbEBraGvxbJGxrosv4QKMfR2i8f59GFAnMXfMc`
+- **Account**: `YOUR_ACCOUNT_PUBKEY`
 
 **Both bots**:
 - $5 per trade, max 15 positions

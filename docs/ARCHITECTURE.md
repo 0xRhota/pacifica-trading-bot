@@ -142,7 +142,7 @@ tail -f logs/lighter_bot.log
 **Position Size**: $250-500 notional ($5-10 margin @ 50x leverage)
 **Max Positions**: 15
 **Interval**: 5 minutes (300 seconds)
-**Account**: `8saejVsbEBraGvxbJGxrosv4QKMfR2i8f59GFAnMXfMc`
+**Account**: `YOUR_ACCOUNT_PUBKEY`
 
 **Features**:
 - High leverage trading (up to 50x)

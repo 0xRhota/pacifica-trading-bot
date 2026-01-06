@@ -27,7 +27,7 @@ from datetime import datetime, timedelta
 import time
 
 PACIFICA_BASE_URL = "https://api.pacifica.fi/api/v1"
-PACIFICA_ACCOUNT = "8saejVsbEBraGvxbJGxrosv4QKMfR2i8f59GFAnMXfMc"
+PACIFICA_ACCOUNT = "YOUR_ACCOUNT_PUBKEY"
 
 def fetch_pacifica_kline(symbol, interval="15m", days_back=3):
     """
@@ -617,7 +617,7 @@ AI_MODEL_NAME = "claude-3-5-sonnet-20241022"
 Add to `.env`:
 ```
 PACIFICA_API_KEY=<if required>
-PACIFICA_ACCOUNT=8saejVsbEBraGvxbJGxrosv4QKMfR2i8f59GFAnMXfMc
+PACIFICA_ACCOUNT=YOUR_ACCOUNT_PUBKEY
 ```
 
 ---

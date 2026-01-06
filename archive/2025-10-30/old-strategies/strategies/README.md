@@ -123,7 +123,7 @@ Stop Loss: -1%
 
 ### Pacifica Bot
 - **DEX**: Solana-based perpetual futures
-- **Account**: 8saejVsbEBraGvxbJGxrosv4QKMfR2i8f59GFAnMXfMc
+- **Account**: YOUR_ACCOUNT_PUBKEY
 - **Strategy**: Orderbook imbalance
 - **Frequency**: Every 15 minutes
 - **Fees**: 0.04% taker

@@ -37,7 +37,7 @@ Pacifica is the primary Solana perpetuals DEX in your stack. Status: **NEEDS INV
 From `CLAUDE.md` and existing code:
 ```bash
 # Positions
-curl "https://api.pacifica.fi/api/v1/positions?account=8saejVsbEBraGvxbJGxrosv4QKMfR2i8f59GFAnMXfMc"
+curl "https://api.pacifica.fi/api/v1/positions?account=YOUR_ACCOUNT_PUBKEY"
 
 # Market data
 curl "https://api.pacifica.fi/api/v1/kline?symbol=SOL&interval=15m"

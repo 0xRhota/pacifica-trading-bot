@@ -1,6 +1,6 @@
 ⚠️ CSV ANALYSIS - DATA MAY BE INACCURATE
 
-**Account**: 8saejVsbEBraGvxbJGxrosv4QKMfR2i8f59GFAnMXfMc
+**Account**: YOUR_ACCOUNT_PUBKEY
 **Source**: CSV file (trade history export)
 **WARNING**: This analysis uses CSV data which may contain parsing errors. Use API data for accurate PL.
 

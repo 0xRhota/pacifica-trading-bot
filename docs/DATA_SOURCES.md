@@ -294,7 +294,7 @@ All endpoints return ClickHouse columnar format:
 ## 2. PACIFICA API
 
 **Base URL:** `https://api.pacifica.fi/api/v1`
-**Account:** `8saejVsbEBraGvxbJGxrosv4QKMfR2i8f59GFAnMXfMc`
+**Account:** `YOUR_ACCOUNT_PUBKEY`
 **Authentication:** API Agent Keys (no private key required)
 **Docs:** https://docs.pacifica.fi/api-documentation
 

@@ -171,7 +171,7 @@ dexes/
 #### Pacifica SDK
 - **File**: `dexes/pacifica/pacifica_sdk.py`
 - **Features**: Get balances, positions, create orders
-- **Account**: `8saejVsbEBraGvxbJGxrosv4QKMfR2i8f59GFAnMXfMc`
+- **Account**: `YOUR_ACCOUNT_PUBKEY`
 - **Status**: Working but bot is paused
 
 #### Hibachi SDK ⭐ NEW
