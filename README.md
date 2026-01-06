@@ -90,18 +90,16 @@ python3 scripts/grid_mm_live.py
 | `A` | Hard exits | Fixed TP/SL rules override LLM decisions |
 | `C` | Copy whale | Mirrors specific wallet positions |
 
-### Active Prompt Strategy
+### Prompt System
 
-The current production prompt is **v9_qwen_enhanced**, based on Alpha Arena Season 1 results.
+The LLM prompt determines how the bot interprets market data. Multiple prompt versions are included in `llm_agent/prompts_archive/` (v1 through v9+).
 
-**How it works:**
-- **5-Signal Scoring**: RSI + MACD + Volume + Price Action + OI confluence
-- **Entry Threshold**: Score >= 3.0 required to open position
-- **Risk/Reward**: Targets 3:1 ratio (30% win rate is profitable)
+**Recommended starting point**: `v9_qwen_enhanced.txt`
+- Uses 5-signal scoring (RSI + MACD + Volume + Price Action + OI)
+- Requires score >= 3.0 to open positions
+- Targets 3:1 risk/reward ratio
 
-**Prompt file**: `llm_agent/prompts_archive/v9_qwen_enhanced.txt`
-
-**All prompt versions**: See `llm_agent/prompts_archive/` directory (v1 through v9+)
+You can modify existing prompts or create your own. The bot loads prompts from this directory.
 
 ### Grid Market Making
 
