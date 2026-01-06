@@ -12,7 +12,7 @@ from datetime import datetime
 import re
 
 # Define paths
-TRADES_DIR = Path("/Users/admin/Documents/Projects/pacifica-trading-bot/logs/trades")
+TRADES_DIR = Path("./logs/trades")
 ARCHIVE_DIR = TRADES_DIR / "archive"
 
 

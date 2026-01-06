@@ -1,8 +1,8 @@
 #!/bin/bash
 # Monitor paper trade - check every 5 minutes for issues
 
-LOG="/Users/admin/Documents/Projects/pacifica-trading-bot/logs/unified_paper_trade.log"
-MONITOR_LOG="/Users/admin/Documents/Projects/pacifica-trading-bot/logs/monitor.log"
+LOG="./logs/unified_paper_trade.log"
+MONITOR_LOG="./logs/monitor.log"
 
 echo "$(date '+%H:%M:%S') | Monitor started" > $MONITOR_LOG
 
