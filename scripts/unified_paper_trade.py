@@ -831,9 +831,19 @@ REASON: [brief explanation]
 
 async def main():
     """Run the unified paper trading test"""
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Unified Paper Trading Test')
+    parser.add_argument('--hours', type=float, default=2.0,
+                        help='Duration in hours (default: 2)')
+    parser.add_argument('--cycle', type=int, default=10,
+                        help='Cycle interval in minutes (default: 10)')
+
+    args = parser.parse_args()
+
     trader = UnifiedPaperTrader(
-        duration_hours=2.0,
-        cycle_minutes=10  # Check every 10 minutes
+        duration_hours=args.hours,
+        cycle_minutes=args.cycle
     )
     await trader.run()
 

@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 from paradex_py import ParadexSubkey
 from paradex_py.common.order import Order, OrderType, OrderSide
+from llm_agent.self_learning import SelfLearning
 
 
 class GridMarketMakerLive:
@@ -54,12 +55,12 @@ class GridMarketMakerLive:
         self,
         symbol: str = "BTC-USD-PERP",
         base_spread_bps: float = 1.5,      # v8: Keep tight
-        order_size_usd: float = 5.0,       # $5 per order for $23 account
-        num_levels: int = 3,               # Fewer levels for small account
+        order_size_usd: float = 50.0,      # $50 per order - use leverage
+        num_levels: int = 2,               # 2 levels per side = $100 per side
         duration_minutes: int = 60,
-        max_inventory_pct: float = 25.0,   # v8: 25% max inventory
-        capital: float = 23.0,
-        roc_threshold_bps: float = 1.0,    # v8: 1.0 bps trend threshold
+        max_inventory_pct: float = 200.0,  # Allow $150 max inventory (using leverage)
+        capital: float = 73.0,
+        roc_threshold_bps: float = 3.0,    # Increased from 1.0 - market too volatile
         min_pause_duration: int = 15,      # v8: 15 second pause
     ):
         self.symbol = symbol
@@ -99,6 +100,25 @@ class GridMarketMakerLive:
         self.tick_size = 1.0  # BTC tick size
         self.step_size = 0.0001  # BTC step size
         self.min_notional = 10.0  # Paradex minimum order notional
+
+        # Self-learning (for user notes / working memory)
+        self.last_self_learning_time = datetime.now()
+        self.self_learning_interval = 1800  # 30 minutes
+
+    def _run_self_learning_check(self):
+        """Check and log user notes + performance (every 30 min)"""
+        notes = SelfLearning.get_active_notes()
+        if notes:
+            logger.info("")
+            logger.info("=" * 50)
+            logger.info("📚 SELF-LEARNING CHECK-IN (Working Memory)")
+            logger.info("=" * 50)
+            for note in notes:
+                ts = note.get('timestamp', '')[:16].replace('T', ' ')
+                msg = note.get('message', '')[:100]
+                logger.info(f"  [{ts}] {msg}")
+            logger.info("=" * 50)
+        self.last_self_learning_time = datetime.now()
 
     def initialize(self):
         """Initialize Paradex client with authentication"""
@@ -493,14 +513,22 @@ class GridMarketMakerLive:
             logger.info(f"  Grid: {orders_placed} orders placed around ${mid_price:,.2f}")
 
     def _check_fills(self) -> int:
-        """Check for filled orders and update stats"""
+        """Check for filled orders and update stats. Also sync open_orders with exchange."""
         fills = 0
         try:
             orders = self.client.api_client.fetch_orders(params={'market': self.symbol})
+            exchange_order_ids = set()
+
             if orders and orders.get('results'):
                 for order in orders['results']:
                     order_id = order.get('id')
-                    if order_id in self.open_orders and order.get('status') == 'CLOSED':
+                    status = order.get('status')
+
+                    # Track active orders on exchange
+                    if status in ['NEW', 'OPEN', 'UNTRIGGERED']:
+                        exchange_order_ids.add(order_id)
+
+                    if order_id in self.open_orders and status == 'CLOSED':
                         # Order filled!
                         info = self.open_orders[order_id]
                         filled_size = float(order.get('filled_size', 0))
@@ -513,6 +541,11 @@ class GridMarketMakerLive:
 
                         logger.info(f"  FILL: {info['side']} {filled_size:.6f} @ ${fill_price:,.2f} (${notional:,.2f})")
                         del self.open_orders[order_id]
+
+            # Sync: remove tracked orders that no longer exist on exchange
+            stale_orders = [oid for oid in self.open_orders if oid not in exchange_order_ids]
+            for oid in stale_orders:
+                del self.open_orders[oid]
 
         except Exception as e:
             logger.error(f"Check fills error: {e}")
@@ -571,10 +604,15 @@ class GridMarketMakerLive:
                 max_inventory = self.capital * (self.max_inventory_pct / 100)
                 inventory_ratio = abs(self.position_notional) / max_inventory if max_inventory > 0 else 0
 
+                # Safety check: refresh if no tracked orders (external cancel/expire)
+                no_tracked_orders = len(self.open_orders) == 0
+                not_fully_paused = not (self.orders_paused and self.pause_side == 'ALL')
+
                 should_refresh = (
                     fills > 0 or
                     price_move_pct >= grid_reset_pct or  # 0.25% price move (v8 behavior)
-                    inventory_ratio > 0.8  # Inventory force reset at 80%
+                    inventory_ratio > 0.8 or  # Inventory force reset at 80%
+                    (no_tracked_orders and not_fully_paused)  # Re-place if orders disappeared
                 )
 
                 if should_refresh:
@@ -582,8 +620,15 @@ class GridMarketMakerLive:
                         logger.info(f"  Grid reset: price moved {price_move_pct:.3f}%")
                     elif inventory_ratio > 0.8:
                         logger.info(f"  Grid reset: inventory at {inventory_ratio*100:.0f}%")
+                    elif no_tracked_orders and not_fully_paused:
+                        logger.info(f"  Grid reset: no active orders, re-placing grid")
                     self._sync_position()
                     self._place_grid_orders(mid)
+
+                # Self-learning check (every 30 min - read user notes)
+                time_since_learning = (datetime.now() - self.last_self_learning_time).total_seconds()
+                if time_since_learning >= self.self_learning_interval:
+                    self._run_self_learning_check()
 
                 # Status log every 30 seconds
                 if cycle % 30 == 0:
@@ -667,20 +712,21 @@ class GridMarketMakerLive:
 
 def main():
     """
-    LIVE Grid MM v8 for $23 Paradex account
+    LIVE Grid MM v8 for Paradex account
 
-    Parameters scaled from $1000 test that achieved +$1.81 per $10k
-    NOTE: Paradex min notional = $10, using $12 per order
+    Using leverage for meaningful position sizes:
+    - $50 per order x 2 levels = $100 per side
+    - 200% max inventory = ~$150 max position (using leverage)
     """
     mm = GridMarketMakerLive(
         symbol="BTC-USD-PERP",
         base_spread_bps=1.5,        # v8: Keep tight
-        order_size_usd=15.0,        # $15 per order (safely above $10 min)
-        num_levels=1,               # 1 level per side (small account)
+        order_size_usd=100.0,       # $100 per order - 3x leverage
+        num_levels=2,               # 2 levels per side = $200 per side
         duration_minutes=525600,    # Run indefinitely (1 year)
-        max_inventory_pct=50.0,     # 50% for small account
-        capital=23.0,               # $23 account
-        roc_threshold_bps=1.0,      # v8: 1.0 bps trend detection
+        max_inventory_pct=300.0,    # Allow $220 max inventory (3x leverage)
+        capital=73.0,               # $73 account
+        roc_threshold_bps=3.0,      # Increased - market too volatile at 1.0
         min_pause_duration=15,      # v8: 15s pause duration
     )
     mm.run()

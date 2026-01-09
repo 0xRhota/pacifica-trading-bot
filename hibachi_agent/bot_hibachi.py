@@ -38,6 +38,7 @@ from hibachi_agent.data.whale_signal import WhaleSignalFetcher
 from utils.cambrian_risk_engine import CambrianRiskEngine
 from llm_agent.data.sentiment_fetcher import SentimentFetcher
 from llm_agent.shared_learning import SharedLearning
+from llm_agent.self_learning import SelfLearning
 
 # Load environment variables from project root
 project_root_env = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
@@ -188,6 +189,12 @@ class HibachiTradingBot:
         self.shared_learning = SharedLearning(bot_name="hibachi")
         logger.info("🧠 Shared Learning initialized (cross-bot insights)")
 
+        # Initialize Self-Learning (performance analysis + working memory)
+        self.self_learning = SelfLearning(self.trade_tracker, min_trades_for_insight=5)
+        self.last_self_learning_time = datetime.now()
+        self.self_learning_interval = 1800  # 30 minutes
+        logger.info("📚 Self-Learning initialized (30-min check-ins + working memory)")
+
         # Initialize strategies
         self.strategy = strategy
         self.strategy_f = None
@@ -274,9 +281,43 @@ class HibachiTradingBot:
         prompt_version = self.llm_agent.prompt_formatter.get_prompt_version()
         logger.info(f"📝 Active Prompt Version: {prompt_version}")
 
+    async def run_self_learning(self):
+        """Run self-learning check-in - analyze performance and log insights"""
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info("📚 SELF-LEARNING CHECK-IN (30-min cycle)")
+        logger.info("=" * 60)
+
+        # Generate learning context with performance insights and user notes
+        context = self.self_learning.generate_learning_context(hours=168)  # Last 7 days
+        if context:
+            for line in context.split('\n'):
+                if line.strip():
+                    logger.info(f"  {line}")
+        else:
+            logger.info("  Not enough trades for insights yet")
+
+        # Also log shared learning context
+        shared_context = self.shared_learning.get_prompt_context()
+        if shared_context and "BLOCKED" in shared_context:
+            logger.info("")
+            logger.info("Cross-bot learning:")
+            for line in shared_context.split('\n')[:10]:
+                if line.strip():
+                    logger.info(f"  {line}")
+
+        self.last_self_learning_time = datetime.now()
+        logger.info("=" * 60)
+        logger.info("")
+
     async def run_once(self):
         """Run single decision cycle - mirrors Lighter bot structure"""
         current_time = datetime.now()
+
+        # Check if time for self-learning check-in (every 30 min)
+        time_since_learning = (current_time - self.last_self_learning_time).total_seconds()
+        if time_since_learning >= self.self_learning_interval:
+            await self.run_self_learning()
 
         logger.info("=" * 80)
         logger.info(f"🔄 Starting decision cycle at {current_time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -688,13 +729,29 @@ class HibachiTradingBot:
             except Exception as e:
                 logger.warning(f"[SHARED] Could not fetch shared learning: {e}")
 
+            # ═══════════════════════════════════════════════════════════════
+            # SELF-LEARNING - Performance insights + User notes (working memory)
+            # ═══════════════════════════════════════════════════════════════
+            self_learning_context = ""
+            try:
+                self_learning_context = self.self_learning.generate_learning_context(hours=168)
+                if self_learning_context:
+                    logger.info("[SELF-LEARN] Performance insights + user notes added to LLM prompt")
+            except Exception as e:
+                logger.warning(f"[SELF-LEARN] Could not generate learning context: {e}")
+
             # Build kwargs based on prompt version
+            # Combine all learning contexts
+            learning_context = ""
+            if self_learning_context:
+                learning_context += f"\n\n=== SELF-LEARNING INSIGHTS ===\n{self_learning_context}"
+
             prompt_kwargs = {
                 "market_table": market_table,
                 "open_positions": open_positions,
                 "account_balance": account_balance,
                 "hourly_review": None,  # Not implemented yet
-                "trade_history": trade_history + risk_context + whale_context,  # Append risk + whale data
+                "trade_history": trade_history + risk_context + whale_context + learning_context,  # Append all context
                 "recently_closed_symbols": recently_closed or [],
                 "dex_name": "Hibachi",
                 "analyzed_tokens": hibachi_symbols,
@@ -965,15 +1022,15 @@ class HibachiTradingBot:
                         continue  # Skip this decision
                 else:
                     # Legacy hardcoded filters (when Strategy F not active)
-                    # FILTER 1: Block low-confidence shorts (34% win rate is unacceptable)
+                    # FILTER 1: Block low-confidence shorts (lowered from 0.9 to 0.75 per Qwen recommendation)
+                    # Rationale: 0.9 created 100% long bias. 0.75 allows shorts while staying conservative.
                     if action == "SHORT":
                         confidence = decision.get('confidence', 0.5)
-                        if confidence < 0.9:
-                            logger.warning(f"  ⛔ BLOCKED: SHORT requires 0.9+ confidence (got {confidence:.2f})")
-                            logger.warning(f"     Historical: SHORTS have 34% win rate, -$46 total loss")
+                        if confidence < 0.75:
+                            logger.warning(f"  ⛔ BLOCKED: SHORT requires 0.75+ confidence (got {confidence:.2f})")
                             continue  # Skip this decision
                         else:
-                            logger.info(f"  ✅ HIGH-CONFIDENCE SHORT allowed ({confidence:.2f})")
+                            logger.info(f"  ✅ SHORT allowed ({confidence:.2f} >= 0.75 threshold)")
 
                     # FILTER 2: Reduce SOL position size (worst PnL despite decent win rate)
                     if symbol == "SOL/USDT-P":

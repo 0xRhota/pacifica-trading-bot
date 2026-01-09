@@ -1,21 +1,20 @@
 """
-Strategy G: Low-Liquidity Momentum Hunter
+Strategy G: Swing Trading (Modified)
 
-Designed for newer/lower-liquidity pairs on Hibachi DEX where:
-- Retail hasn't priced in moves yet
-- Volatility creates opportunities
-- Fees matter less due to larger moves
+SWING TRADING mode - focus on liquid majors for bigger moves:
+- BTC, ETH, SOL as primary targets
+- 8-hour max hold for swing trades
+- Wider stops (-3%) and targets (+5%)
+- Fewer positions (2 max), higher conviction
 
-Based on Qwen consultation:
-- 2-hour max hold (not 4h - too risky for low-liq)
-- -2% stop with trailing after +1.5%
-- +3% take profit target
-- 25-trade rolling window for self-learning
-- VWAP + volume spike signals
+Exit Rules:
+- -3% stop loss (wider for swings)
+- +5% take profit target
+- Trailing stop after +2.5% (trail at 1%)
 
-Target pairs (avoid BTC/ETH - too efficient):
-Tier 1: HYPE, PUMP, VIRTUAL, ENA, PROVE, XPL
-Tier 2: DOGE, SEI, SUI, BNB
+Target pairs (liquid majors for swings):
+Tier 1: BTC, ETH, SOL
+Tier 2: SUI, DOGE, XRP
 """
 
 import logging
@@ -41,22 +40,22 @@ class StrategyGLowLiqHunter:
 
     STRATEGY_NAME = "STRATEGY_G_LOW_LIQ_HUNTER"
 
-    # Target low-liquidity pairs
-    TIER_1_PAIRS = ["HYPE/USDT-P", "PUMP/USDT-P", "VIRTUAL/USDT-P", "ENA/USDT-P", "PROVE/USDT-P", "XPL/USDT-P"]
-    TIER_2_PAIRS = ["DOGE/USDT-P", "SEI/USDT-P", "SUI/USDT-P", "BNB/USDT-P", "ZEC/USDT-P", "XRP/USDT-P"]
+    # SWING TRADING: Focus on liquid majors for bigger moves
+    TIER_1_PAIRS = ["BTC/USDT-P", "ETH/USDT-P", "SOL/USDT-P"]  # Majors for swing trades
+    TIER_2_PAIRS = ["SUI/USDT-P", "DOGE/USDT-P", "XRP/USDT-P"]  # Liquid alts
 
-    # Avoid majors - too efficient, retail priced in
-    AVOID_PAIRS = ["BTC/USDT-P", "ETH/USDT-P", "SOL/USDT-P"]
+    # Avoid low-liq pairs - too risky for swings
+    AVOID_PAIRS = ["PUMP/USDT-P", "PROVE/USDT-P", "HYPE/USDT-P", "XPL/USDT-P", "VIRTUAL/USDT-P"]
 
     def __init__(
         self,
-        position_size: float = 15.0,  # $15 base (small for volatile pairs)
-        max_positions: int = 3,  # Focus, not spray
-        max_hold_minutes: int = 120,  # 2 hours max (Qwen recommendation)
-        stop_loss_pct: float = -2.0,  # -2% stop (allow breathing room)
-        take_profit_pct: float = 3.0,  # +3% target
-        trailing_trigger_pct: float = 1.5,  # Start trailing after +1.5%
-        trailing_stop_pct: float = 0.75,  # Trail at 0.75% behind high
+        position_size: float = 25.0,  # $25 base for swing trades
+        max_positions: int = 2,  # Focus on fewer, higher conviction trades
+        max_hold_minutes: int = 480,  # 8 hours max for swing trades
+        stop_loss_pct: float = -3.0,  # -3% stop (wider for swings)
+        take_profit_pct: float = 5.0,  # +5% target for swings
+        trailing_trigger_pct: float = 2.5,  # Start trailing after +2.5%
+        trailing_stop_pct: float = 1.0,  # Trail at 1.0% behind high
         rolling_window: int = 25,  # Trades for learning (Qwen: 20-30)
         state_file: str = "logs/strategies/strategy_g_state.json"
     ):

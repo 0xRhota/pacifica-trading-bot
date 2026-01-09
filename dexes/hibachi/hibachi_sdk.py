@@ -507,14 +507,6 @@ class HibachiSDK:
                 max_fees=max_fees_int
             )
 
-            # Debug logging
-            logger.info(f"Binary buffer ({len(buffer)} bytes): {list(buffer)}")
-            logger.info(f"Nonce: {nonce}")
-            logger.info(f"Contract ID: {contract_id}")
-            logger.info(f"Quantity (with decimals): {quantity_int}")
-            logger.info(f"Side: {side_int}")
-            logger.info(f"Max fees: {max_fees_int}")
-
             # Sign the buffer
             signature = self._sign_order_buffer(buffer)
 
@@ -557,6 +549,114 @@ class HibachiSDK:
 
         except Exception as e:
             logger.error(f"Error creating order: {e}")
+            return {'error': str(e)}
+
+    async def create_limit_order(
+        self,
+        symbol: str,
+        is_buy: bool,
+        amount: float,
+        price: float
+    ) -> Optional[Dict]:
+        """
+        Create a limit order using binary buffer signature
+
+        Args:
+            symbol: Market symbol (e.g., "BTC/USDT-P")
+            is_buy: True for buy, False for sell
+            amount: Order size in base currency
+            price: Limit price
+
+        Returns:
+            Order response or None
+        """
+        try:
+            # Get account ID
+            account_id = self.get_account_id()
+            if not account_id:
+                logger.error("Cannot create order: account ID not set.")
+                return None
+
+            # Get market info
+            market_info = await self.get_market_info(symbol)
+            if not market_info:
+                logger.error(f"Cannot create order: market info not found for {symbol}")
+                return None
+
+            contract_id = market_info.get("id")
+            underlying_decimals = market_info.get("underlyingDecimals", 8)
+            settlement_decimals = market_info.get("settlementDecimals", 6)
+
+            if contract_id is None:
+                logger.error(f"Cannot create order: contract ID not found for {symbol}")
+                return None
+
+            # Generate nonce
+            nonce = int(time.time() * 1000)
+
+            # Convert quantity to integer with underlying decimals
+            quantity_int = int(amount * (10 ** underlying_decimals))
+
+            # Price formula from Hibachi docs: price * 2^32 * 10^(settlementDecimals - underlyingDecimals)
+            # This uses fixed-point representation with 32 bits after decimal point
+            price_exponent = settlement_decimals - underlying_decimals
+            price_int = int(price * (2**32) * (10 ** price_exponent))
+
+            # Side: 0=ASK (sell), 1=BID (buy)
+            side_int = 1 if is_buy else 0
+
+            # Max fees
+            max_fees_int = int(0.005 * (10 ** 8))
+
+            # Pack binary buffer with price for limit order
+            buffer = self._pack_order_buffer(
+                nonce=nonce,
+                contract_id=contract_id,
+                quantity=quantity_int,
+                side=side_int,
+                price=price_int,
+                max_fees=max_fees_int
+            )
+
+            # Sign the buffer
+            signature = self._sign_order_buffer(buffer)
+
+            # Build order request
+            quantity_str = f"{quantity_int / (10 ** underlying_decimals):.{underlying_decimals}f}".rstrip('0').rstrip('.')
+            # Price string should match the actual price (human readable)
+            price_str = f"{price:.6f}".rstrip('0').rstrip('.')
+
+            order_data = {
+                "accountId": int(account_id),
+                "symbol": symbol,
+                "side": "BID" if is_buy else "ASK",
+                "orderType": "LIMIT",
+                "quantity": quantity_str,
+                "price": price_str,
+                "nonce": nonce,
+                "maxFeesPercent": "0.00500000",
+                "signature": signature
+            }
+
+            headers = self._get_headers()
+            endpoint = "/trade/order"
+            url = f"{self.base_url}{endpoint}"
+
+            logger.info(f"Creating LIMIT order: {symbol} {'BUY' if is_buy else 'SELL'} {amount} @ ${price}")
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=order_data) as resp:
+                    if resp.status == 200:
+                        response = await resp.json()
+                        logger.info(f"✅ Limit order created: {response}")
+                        return response
+                    else:
+                        error_text = await resp.text()
+                        logger.error(f"Failed to create limit order - API Error {resp.status}: {error_text}")
+                        return {'error': error_text, 'status': resp.status}
+
+        except Exception as e:
+            logger.error(f"Error creating limit order: {e}")
             return {'error': str(e)}
 
     async def cancel_order(self, order_id: str) -> bool:

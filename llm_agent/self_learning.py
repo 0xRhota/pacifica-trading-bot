@@ -130,7 +130,7 @@ class SelfLearning:
 
         for trade in trades:
             symbol = trade.get('symbol')
-            pnl = trade.get('pnl', 0)
+            pnl = trade.get('pnl') or 0
 
             if pnl > 0:
                 symbol_stats[symbol]['wins'] += 1
@@ -172,7 +172,7 @@ class SelfLearning:
             else:
                 continue
 
-            pnl = trade.get('pnl', 0)
+            pnl = trade.get('pnl') or 0
             if pnl > 0:
                 side_stats[side]['wins'] += 1
             else:
@@ -211,8 +211,8 @@ class SelfLearning:
         }
 
         for trade in trades:
-            conf = trade.get('confidence', 0.5)
-            pnl = trade.get('pnl', 0)
+            conf = trade.get('confidence') or 0.5  # Handle None values
+            pnl = trade.get('pnl') or 0
 
             if conf < 0.6:
                 bucket = 'low (0.5-0.6)'
@@ -302,8 +302,8 @@ class SelfLearning:
         lines.append("=" * 60)
 
         # Overall stats
-        total_pnl = sum(t.get('pnl', 0) for t in trades)
-        wins = len([t for t in trades if t.get('pnl', 0) > 0])
+        total_pnl = sum((t.get('pnl') or 0) for t in trades)
+        wins = len([t for t in trades if (t.get('pnl') or 0) > 0])
         total = len(trades)
         win_rate = wins / total if total > 0 else 0
 
@@ -349,7 +349,7 @@ class SelfLearning:
 
         # Recent streak
         recent = sorted(trades, key=lambda t: t.get('exit_timestamp', ''), reverse=True)[:5]
-        recent_wins = len([t for t in recent if t.get('pnl', 0) > 0])
+        recent_wins = len([t for t in recent if (t.get('pnl') or 0) > 0])
         if recent_wins >= 4:
             lines.append("\nSTREAK: Hot streak! Last 5 trades mostly winners - maintain discipline")
         elif recent_wins <= 1:

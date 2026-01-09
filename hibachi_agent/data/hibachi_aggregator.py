@@ -21,19 +21,16 @@ from hibachi_agent.data.hibachi_fetcher import HibachiDataFetcher
 
 logger = logging.getLogger(__name__)
 
-# WHITELIST: Low-liquidity pairs for Strategy G
-# Based on 2026-01-02 analysis:
-#   - BTC/ETH lost $116 in 7 days with 20% win rate + $51 fees
-#   - Pivoting to low-liq pairs where retail hasn't priced in moves
-#   - Avoiding majors (BTC, ETH, SOL) - too efficient
-# Strategy G: Low-Liquidity Momentum Hunter
+# WHITELIST: Swing trading - liquid majors for bigger moves
+# 2026-01-08: Switched to swing trading mode
+#   - Focus on BTC, ETH, SOL for larger moves
+#   - 8-hour holds, wider stops/targets
+#   - Fewer trades, higher conviction
 WHITELISTED_SYMBOLS = {
-    # Tier 1: Newest/Most Volatile
-    "HYPE/USDT-P", "PUMP/USDT-P", "VIRTUAL/USDT-P",
-    "ENA/USDT-P", "PROVE/USDT-P", "XPL/USDT-P",
-    # Tier 2: Mid-Volatility
-    "DOGE/USDT-P", "SEI/USDT-P", "SUI/USDT-P",
-    "BNB/USDT-P", "ZEC/USDT-P", "XRP/USDT-P"
+    # Tier 1: Majors for swing trades
+    "BTC/USDT-P", "ETH/USDT-P", "SOL/USDT-P",
+    # Tier 2: Liquid alts
+    "SUI/USDT-P", "DOGE/USDT-P", "XRP/USDT-P"
 }
 
 
