@@ -140,6 +140,15 @@ class GridMarketMakerNado:
         self.tight_spread_activation_seconds = 120  # 2 minutes of calm
         self.tight_spread_reduction_pct = 0.20  # Reduce spread by 20%
 
+        # v17: Inventory rebalancing (NP-003)
+        self.max_inventory_start_time = None
+        self.last_rebalance_time = None
+        self.rebalance_threshold_pct = 95.0  # Trigger at 95% inventory
+        self.rebalance_wait_seconds = 900  # 15 minutes at max inventory
+        self.rebalance_cooldown_seconds = 3600  # Once per hour max
+        self.rebalance_close_pct = 0.25  # Close 25% of position
+        self.fills_since_max_inventory = 0
+
         # Position tracking
         self.position_size = 0.0
         self.position_notional = 0.0
@@ -427,6 +436,99 @@ class GridMarketMakerNado:
                 logger.info(f"  📈 TIGHT_SPREAD mode: deactivated (ROC: {roc:+.1f}bps > {self.tight_spread_exit_threshold_bps}bps)")
             self.tight_spread_mode = False
             self.low_roc_start_time = None
+
+    async def _check_inventory_rebalance(self, inventory_pct: float, fills: int) -> bool:
+        """
+        NP-003: Check if inventory rebalance is needed.
+
+        - Track time at max inventory (>=95%)
+        - After 15 minutes at max inventory with 0 fills, close 25% of position
+        - Limit to once per hour maximum
+
+        Args:
+            inventory_pct: Current inventory as percentage of max (0-100+)
+            fills: Number of fills in this cycle
+
+        Returns:
+            True if rebalance was executed, False otherwise
+        """
+        # Track fills while at max inventory
+        if fills > 0:
+            self.fills_since_max_inventory += fills
+
+        # Check if at max inventory
+        at_max_inventory = inventory_pct >= self.rebalance_threshold_pct
+
+        if at_max_inventory:
+            # Start tracking if not already
+            if self.max_inventory_start_time is None:
+                self.max_inventory_start_time = datetime.now()
+                self.fills_since_max_inventory = 0
+                logger.info(f"  ⚠️ At {inventory_pct:.0f}% inventory - starting rebalance timer")
+                return False
+
+            # Check how long at max inventory
+            time_at_max = (datetime.now() - self.max_inventory_start_time).total_seconds()
+
+            # Check cooldown from last rebalance
+            if self.last_rebalance_time:
+                time_since_rebalance = (datetime.now() - self.last_rebalance_time).total_seconds()
+                if time_since_rebalance < self.rebalance_cooldown_seconds:
+                    return False  # Still in cooldown
+
+            # Check if should rebalance: 15 min at max inventory with 0 fills
+            if time_at_max >= self.rebalance_wait_seconds and self.fills_since_max_inventory == 0:
+                # Execute rebalance
+                await self._execute_inventory_rebalance()
+                return True
+
+        else:
+            # Not at max inventory - reset tracking
+            if self.max_inventory_start_time is not None:
+                logger.info(f"  ✅ Inventory reduced to {inventory_pct:.0f}% - rebalance timer reset")
+            self.max_inventory_start_time = None
+            self.fills_since_max_inventory = 0
+
+        return False
+
+    async def _execute_inventory_rebalance(self):
+        """
+        NP-003: Execute inventory rebalance by closing 25% of position via market order.
+        """
+        if self.position_size == 0:
+            return
+
+        close_size = abs(self.position_size) * self.rebalance_close_pct
+        close_notional = close_size * (await self._get_mid_price() or 0)
+
+        # Determine direction - close means opposite of position
+        is_buy = self.position_size < 0  # If SHORT, buy to close
+
+        side_str = "LONG" if self.position_size > 0 else "SHORT"
+        action_str = "SELL" if self.position_size > 0 else "BUY"
+
+        logger.warning(f"  🔄 Inventory rebalance: closing 25% of {side_str} position")
+        logger.warning(f"     {action_str} {close_size:.6f} (~${close_notional:.2f})")
+
+        try:
+            result = await self.sdk.create_market_order(
+                symbol=self.symbol,
+                is_buy=is_buy,
+                amount=self._round_size(close_size)
+            )
+
+            if result and result.get('status') == 'success':
+                logger.info(f"  ✅ Rebalance executed successfully")
+                self.last_rebalance_time = datetime.now()
+                self.max_inventory_start_time = None
+                self.fills_since_max_inventory = 0
+                # Sync position after rebalance
+                await self._sync_position()
+            else:
+                logger.error(f"  ❌ Rebalance failed: {result}")
+
+        except Exception as e:
+            logger.error(f"  ❌ Rebalance error: {e}")
 
     def _check_stale_orders(self, mid_price: float) -> Optional[tuple]:
         """
@@ -755,6 +857,10 @@ class GridMarketMakerNado:
                 loop_balance = await self.sdk.get_balance() or self.capital
                 max_inventory = loop_balance * (self.max_inventory_pct / 100)
                 inventory_ratio = abs(self.position_notional) / max_inventory if max_inventory > 0 else 0
+
+                # NP-003: Check for inventory rebalance (Nado-specific due to liquidity issues)
+                inventory_pct = inventory_ratio * 100
+                await self._check_inventory_rebalance(inventory_pct, fills)
 
                 # Safety: refresh if no tracked orders
                 no_tracked = len(self.open_orders) == 0
