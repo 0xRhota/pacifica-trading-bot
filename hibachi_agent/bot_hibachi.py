@@ -1178,6 +1178,37 @@ class HibachiTradingBot:
                 logger.info(f"   Reasoning: {decision.get('reasoning', 'N/A')}")
 
                 # ═══════════════════════════════════════════════════════════════
+                # HIB-006: POSITION SIZING BASED ON CONVICTION (2026-01-22)
+                # Size positions larger when LLM confidence is higher
+                # ═══════════════════════════════════════════════════════════════
+                if action in ["LONG", "SHORT"]:
+                    # Base size tiers based on confidence
+                    # 0.7-0.8: base size ($100 default)
+                    # 0.8-0.9: 1.5x size
+                    # 0.9+: 2x size
+                    base_size = self.position_size
+                    size_multiplier = 1.0
+
+                    if raw_confidence >= 0.9:
+                        size_multiplier = 2.0
+                    elif raw_confidence >= 0.8:
+                        size_multiplier = 1.5
+                    # else: 1.0x (base size)
+
+                    conviction_size = base_size * size_multiplier
+                    decision['position_size_usd'] = conviction_size
+
+                    # Check available margin (never exceed balance)
+                    if account_balance and conviction_size > account_balance * 0.5:
+                        # Cap at 50% of balance
+                        capped_size = account_balance * 0.5
+                        logger.warning(f"   ⚠️ Size capped: ${conviction_size:.2f} → ${capped_size:.2f} (50% of balance)")
+                        decision['position_size_usd'] = capped_size
+                        conviction_size = capped_size
+                    else:
+                        logger.info(f"   📊 Conviction size: {size_multiplier}x = ${conviction_size:.2f} (conf: {raw_confidence:.2f})")
+
+                # ═══════════════════════════════════════════════════════════════
                 # ADAPTIVE SYSTEM: Pre-trade checks (2026-01-10)
                 # ═══════════════════════════════════════════════════════════════
                 if action in ["LONG", "SHORT"]:
