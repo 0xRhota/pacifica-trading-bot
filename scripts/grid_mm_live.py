@@ -1,20 +1,28 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.11
 """
-Grid Market Maker v8 - LIVE on Paradex
-$23 Account - Real Order Placement
+Grid Market Maker v15 - LIVE on Paradex
+Dynamic spread based on ROC volatility + time-based refresh
 
 Strategy: Place limit orders on both sides of mid price
 - Earns spread + maker rebates (-0.005%)
-- Uses v8 parameters proven profitable in paper trading
+- DYNAMIC SPREAD: Automatically adjusts based on volatility
+- TIME-BASED REFRESH: Refresh orders every 5 minutes (US-002)
 
-v8 Winning Parameters (proven +$1.81 per $10k):
-- Spread: 1.5 bps
-- ROC threshold: 1.0 bps (trend detection)
-- Pause duration: 15 seconds
-- Inventory limit: 25%
+v15 Changes (Time-based refresh - US-002):
+- Added last_refresh_time tracking
+- Refresh orders if >5 minutes since last placement
+- Log shows 'Time-based refresh' when triggered
 
-Reference: research/strategies/GRID_MM_EVOLUTION.md
-Reference: research/LEARNINGS.md
+v12 Parameters (Dynamic Spread):
+- Spread: DYNAMIC based on ROC
+  - ROC 0-5 bps → 1.5 bps spread (calm market, max fills)
+  - ROC 5-15 bps → 3 bps spread (low volatility)
+  - ROC 15-30 bps → 6 bps spread (moderate volatility)
+  - ROC 30-50 bps → 10 bps spread (high volatility)
+  - ROC >50 bps → PAUSE orders (existing pause logic)
+- ROC threshold: 50 bps for pause
+- Pause duration: 5 minutes
+- Grid reset: 0.5% price move OR 5 min time-based refresh
 """
 
 import os
@@ -47,21 +55,21 @@ from llm_agent.self_learning import SelfLearning
 
 class GridMarketMakerLive:
     """
-    Live Grid Market Maker for Paradex
-    Places actual limit orders on exchange
+    Live Grid Market Maker v15 for Paradex
+    Dynamic spread based on ROC volatility + time-based refresh (US-002)
     """
 
     def __init__(
         self,
         symbol: str = "BTC-USD-PERP",
-        base_spread_bps: float = 1.5,      # v8: Keep tight
+        base_spread_bps: float = 8.0,      # v11: 8 bps (15 too wide) per Qwen
         order_size_usd: float = 50.0,      # $50 per order - use leverage
         num_levels: int = 2,               # 2 levels per side = $100 per side
         duration_minutes: int = 60,
-        max_inventory_pct: float = 200.0,  # Allow $150 max inventory (using leverage)
+        max_inventory_pct: float = 100.0,  # v10: lower leverage
         capital: float = 73.0,
-        roc_threshold_bps: float = 3.0,    # Increased from 1.0 - market too volatile
-        min_pause_duration: int = 15,      # v8: 15 second pause
+        roc_threshold_bps: float = 50.0,   # v10: real trends only per Qwen
+        min_pause_duration: int = 300,     # v10: 5 min pause per Qwen
     ):
         self.symbol = symbol
         self.base_spread_bps = base_spread_bps
@@ -77,12 +85,20 @@ class GridMarketMakerLive:
         self.client = None
         self.grid_center = None
         self.open_orders: Dict[str, Dict] = {}  # order_id -> order info
-        self.price_history: deque = deque(maxlen=30)
+        self.price_history: deque = deque(maxlen=360)  # 6 minutes at 1/sec
 
         # Trend detection
         self.orders_paused = False
         self.pause_side = None
         self.pause_start_time = None
+
+        # Dynamic spread tracking
+        self.current_spread_bps = base_spread_bps
+        self.last_spread_bps = base_spread_bps
+
+        # v15: Time-based refresh (US-002)
+        self.last_refresh_time = None
+        self.time_refresh_interval = 300  # 5 minutes
 
         # Stats
         self.total_volume = 0.0
@@ -123,16 +139,22 @@ class GridMarketMakerLive:
     def initialize(self):
         """Initialize Paradex client with authentication"""
         logger.info("=" * 70)
-        logger.info("GRID MARKET MAKER v8 - LIVE TRADING")
+        logger.info("GRID MARKET MAKER v15 - DYNAMIC SPREAD + TIME REFRESH")
         logger.info("=" * 70)
         logger.info(f"Symbol: {self.symbol}")
-        logger.info(f"Spread: {self.base_spread_bps} bps")
+        logger.info(f"Spread: DYNAMIC (1.5-15 bps based on ROC)")
+        logger.info(f"  ROC 0-5 bps → 1.5 bps spread")
+        logger.info(f"  ROC 5-15 bps → 3 bps spread")
+        logger.info(f"  ROC 15-30 bps → 6 bps spread")
+        logger.info(f"  ROC 30-50 bps → 10 bps spread")
+        logger.info(f"  ROC >50 bps → PAUSE orders")
         logger.info(f"Order Size: ${self.order_size_usd}")
         logger.info(f"Levels: {self.num_levels} per side")
         logger.info(f"Capital: ${self.capital}")
         logger.info(f"Max Inventory: {self.max_inventory_pct}%")
         logger.info(f"ROC Threshold: {self.roc_threshold_bps} bps")
         logger.info(f"Min Pause: {self.min_pause_duration}s")
+        logger.info(f"Time-based Refresh: {self.time_refresh_interval}s")
         logger.info("=" * 70)
 
         # Initialize authenticated client
@@ -153,9 +175,8 @@ class GridMarketMakerLive:
         self.current_balance = self.initial_balance
         logger.info(f"Account balance: ${self.initial_balance:.2f}")
 
-        if self.initial_balance < self.capital:
-            logger.warning(f"Account balance ${self.initial_balance:.2f} < expected ${self.capital}")
-            self.capital = self.initial_balance
+        # Use actual balance as capital (dynamic, not hardcoded)
+        self.capital = self.initial_balance
 
         # Get market info
         markets = self.client.api_client.fetch_markets()
@@ -270,18 +291,50 @@ class GridMarketMakerLive:
         return max(rounded, step_dec)
 
     def _calculate_roc(self) -> float:
-        """Calculate Rate of Change in bps"""
-        if len(self.price_history) < 10:
-            return 0.0
+        """Calculate Rate of Change in bps over 3-minute window"""
+        if len(self.price_history) < 180:
+            return 0.0  # Need 3 min of data before calculating ROC
 
         prices = list(self.price_history)
         current = prices[-1]
-        past = prices[-10]
+        past = prices[-180]  # 3 minutes ago (180 samples at 1/sec)
 
         if past == 0:
             return 0.0
 
         return (current - past) / past * 10000
+
+    def _calculate_dynamic_spread(self, roc: float) -> float:
+        """
+        Calculate dynamic spread based on ROC (volatility).
+
+        Returns spread in bps. Lower ROC = tighter spread (more fills).
+        Higher ROC = wider spread (protect from adverse selection).
+
+        Spread bands:
+        | ROC (abs) | Spread | Rationale |
+        |-----------|--------|-----------|
+        | 0-5 bps   | 1.5 bps| Calm market, max fills |
+        | 5-15 bps  | 3 bps  | Low volatility, balanced |
+        | 15-30 bps | 6 bps  | Moderate volatility, protect |
+        | 30-50 bps | 10 bps | High volatility, wide protection |
+        | > 50 bps  | PAUSE  | Handled by existing pause logic |
+        """
+        abs_roc = abs(roc)
+
+        if abs_roc < 5:
+            spread = 1.5
+        elif abs_roc < 15:
+            spread = 3.0
+        elif abs_roc < 30:
+            spread = 6.0
+        elif abs_roc < 50:
+            spread = 10.0
+        else:
+            # Above 50 bps is handled by pause logic, but return wide spread as fallback
+            spread = 15.0
+
+        return spread
 
     def _update_pause_state(self, roc: float):
         """
@@ -350,13 +403,12 @@ class GridMarketMakerLive:
         except Exception as e:
             logger.error(f"Cancel all orders error: {e}")
 
-    def _place_grid_orders(self, mid_price: float):
+    def _place_grid_orders(self, mid_price: float, roc: float = 0.0):
         """
-        Place grid of limit orders
+        Place grid of limit orders with dynamic spread based on volatility (ROC)
 
-        TASK 9: IMPROVED INVENTORY SKEW LOGIC
-        When heavily positioned, ONLY place orders that REDUCE the position.
-        This prevents adverse selection (adding to losers).
+        Dynamic spread protects from adverse selection during volatile periods
+        while capturing fills during calm markets.
         """
         # First cancel existing orders
         self._cancel_all_orders()
@@ -366,8 +418,24 @@ class GridMarketMakerLive:
             logger.info(f"  Grid SKIPPED: Strong trend detected, all orders paused")
             return
 
-        spread_pct = self.base_spread_bps / 10000
-        max_inventory = self.capital * (self.max_inventory_pct / 100)
+        # Calculate dynamic spread based on current volatility
+        self.current_spread_bps = self._calculate_dynamic_spread(roc)
+
+        # Log spread changes
+        if self.current_spread_bps != self.last_spread_bps:
+            direction = "WIDENED" if self.current_spread_bps > self.last_spread_bps else "TIGHTENED"
+            logger.info(f"  📊 SPREAD {direction}: {self.last_spread_bps:.1f} → {self.current_spread_bps:.1f} bps (ROC: {roc:+.1f})")
+            self.last_spread_bps = self.current_spread_bps
+
+        spread_pct = self.current_spread_bps / 10000
+        # DYNAMIC BALANCE: Fetch fresh balance for inventory calculations
+        # (Don't use cached self.capital - balance may have changed from deposits/withdrawals)
+        try:
+            account = self.client.api_client.fetch_account_summary()
+            current_balance = float(account.account_value) if account else self.capital
+        except:
+            current_balance = self.capital
+        max_inventory = current_balance * (self.max_inventory_pct / 100)
 
         # Calculate inventory ratio (signed: positive=long, negative=short)
         inv_ratio = self.position_notional / max_inventory if max_inventory > 0 else 0
@@ -440,6 +508,7 @@ class GridMarketMakerLive:
                         size=size_dec,
                         limit_price=price_dec,
                         client_id=f"grid_buy_{i}_{int(time.time())}",
+                        instruction="POST_ONLY",  # Maker-only: reject if would cross spread
                     )
                     result = self.client.api_client.submit_order(order)
                     if result.get('status') in ['NEW', 'OPEN']:
@@ -493,6 +562,7 @@ class GridMarketMakerLive:
                         size=size_dec,
                         limit_price=price_dec,
                         client_id=f"grid_sell_{i}_{int(time.time())}",
+                        instruction="POST_ONLY",  # Maker-only: reject if would cross spread
                     )
                     result = self.client.api_client.submit_order(order)
                     if result.get('status') in ['NEW', 'OPEN']:
@@ -510,7 +580,7 @@ class GridMarketMakerLive:
 
         self.grid_center = mid_price
         if orders_placed > 0:
-            logger.info(f"  Grid: {orders_placed} orders placed around ${mid_price:,.2f}")
+            logger.info(f"  Grid: {orders_placed} orders placed around ${mid_price:,.2f} (spread: {self.current_spread_bps:.1f}bps)")
 
     def _check_fills(self) -> int:
         """Check for filled orders and update stats. Also sync open_orders with exchange."""
@@ -560,13 +630,14 @@ class GridMarketMakerLive:
 
             end_time = self.start_time + timedelta(minutes=self.duration_minutes)
             cycle = 0
-            grid_reset_pct = 0.25  # Reset grid on 0.25% price move (matches v8 paper trading)
+            grid_reset_pct = 0.50  # v10: 0.5% price move - less whipsawing
 
             logger.info(f"\nStarting live trading until {end_time.strftime('%H:%M:%S')}...")
             logger.info("-" * 70)
 
             # Place initial grid
             self._place_grid_orders(self.grid_center)
+            self.last_refresh_time = datetime.now()  # v15: Track refresh time
 
             while datetime.now() < end_time:
                 cycle += 1
@@ -600,19 +671,29 @@ class GridMarketMakerLive:
                 # Refresh grid on price move or fills (matches v8 paper trading logic)
                 price_move_pct = abs(mid - self.grid_center) / self.grid_center * 100 if self.grid_center else 0
 
-                # Calculate inventory ratio for force reset
-                max_inventory = self.capital * (self.max_inventory_pct / 100)
+                # Calculate inventory ratio for force reset (use fresh balance)
+                try:
+                    loop_account = self.client.api_client.fetch_account_summary()
+                    loop_balance = float(loop_account.account_value) if loop_account else self.capital
+                except:
+                    loop_balance = self.capital
+                max_inventory = loop_balance * (self.max_inventory_pct / 100)
                 inventory_ratio = abs(self.position_notional) / max_inventory if max_inventory > 0 else 0
 
                 # Safety check: refresh if no tracked orders (external cancel/expire)
                 no_tracked_orders = len(self.open_orders) == 0
                 not_fully_paused = not (self.orders_paused and self.pause_side == 'ALL')
 
+                # v15: Time-based refresh check (US-002)
+                time_since_refresh = (datetime.now() - self.last_refresh_time).total_seconds() if self.last_refresh_time else 0
+                time_based_refresh = time_since_refresh >= self.time_refresh_interval
+
                 should_refresh = (
                     fills > 0 or
-                    price_move_pct >= grid_reset_pct or  # 0.25% price move (v8 behavior)
+                    price_move_pct >= grid_reset_pct or  # 0.5% price move (v10 behavior)
                     inventory_ratio > 0.8 or  # Inventory force reset at 80%
-                    (no_tracked_orders and not_fully_paused)  # Re-place if orders disappeared
+                    (no_tracked_orders and not_fully_paused) or  # Re-place if orders disappeared
+                    time_based_refresh  # v15: Refresh every 5 minutes regardless of price/fills
                 )
 
                 if should_refresh:
@@ -622,8 +703,11 @@ class GridMarketMakerLive:
                         logger.info(f"  Grid reset: inventory at {inventory_ratio*100:.0f}%")
                     elif no_tracked_orders and not_fully_paused:
                         logger.info(f"  Grid reset: no active orders, re-placing grid")
+                    elif time_based_refresh:
+                        logger.info(f"  Time-based refresh: {time_since_refresh:.0f}s since last placement")
                     self._sync_position()
-                    self._place_grid_orders(mid)
+                    self._place_grid_orders(mid, roc)
+                    self.last_refresh_time = datetime.now()  # v15: Update refresh time
 
                 # Self-learning check (every 30 min - read user notes)
                 time_since_learning = (datetime.now() - self.last_self_learning_time).total_seconds()
@@ -644,7 +728,7 @@ class GridMarketMakerLive:
                     inv_pct = abs(self.position_notional) / self.capital * 100 if self.capital > 0 else 0
                     pause_status = f"PAUSE-{self.pause_side}" if self.orders_paused else "LIVE"
 
-                    logger.info(f"\n[{elapsed:.1f}m] ${mid:,.2f} | Spread: {spread_bps:.1f}bps | ROC: {roc:+.1f}bps | {pause_status}")
+                    logger.info(f"\n[{elapsed:.1f}m] ${mid:,.2f} | Mkt: {spread_bps:.1f}bps | Bot: {self.current_spread_bps:.1f}bps | ROC: {roc:+.1f}bps | {pause_status}")
                     logger.info(f"  Position: {self.position_size:.6f} BTC ({inv_pct:.0f}% inv)")
                     logger.info(f"  Volume: ${self.total_volume:,.2f} | Fills: {self.fills_count}")
                     logger.info(f"  P&L: ${pnl:+.2f} (${self.current_balance:.2f})")
@@ -680,7 +764,7 @@ class GridMarketMakerLive:
         pnl = self.current_balance - self.initial_balance
 
         logger.info("\n" + "=" * 70)
-        logger.info("GRID MM v8 LIVE - FINAL REPORT")
+        logger.info("GRID MM v15 LIVE - FINAL REPORT")
         logger.info("=" * 70)
         logger.info(f"Duration: {elapsed:.1f} minutes")
         logger.info(f"Total Volume: ${self.total_volume:,.2f}")
@@ -712,22 +796,25 @@ class GridMarketMakerLive:
 
 def main():
     """
-    LIVE Grid MM v8 for Paradex account
+    LIVE Grid MM v12 for Paradex account
 
-    Using leverage for meaningful position sizes:
-    - $50 per order x 2 levels = $100 per side
-    - 200% max inventory = ~$150 max position (using leverage)
+    Dynamic spread based on ROC volatility:
+    - ROC 0-5 bps → 1.5 bps spread (calm market)
+    - ROC 5-15 bps → 3 bps spread (low volatility)
+    - ROC 15-30 bps → 6 bps spread (moderate volatility)
+    - ROC 30-50 bps → 10 bps spread (high volatility)
+    - ROC >50 bps → PAUSE orders
     """
     mm = GridMarketMakerLive(
         symbol="BTC-USD-PERP",
-        base_spread_bps=1.5,        # v8: Keep tight
-        order_size_usd=100.0,       # $100 per order - 3x leverage
-        num_levels=2,               # 2 levels per side = $200 per side
+        base_spread_bps=8.0,        # v11: 8 bps (15 too wide) per Qwen
+        order_size_usd=100.0,       # $100 per order
+        num_levels=2,               # 2 levels per side
         duration_minutes=525600,    # Run indefinitely (1 year)
-        max_inventory_pct=300.0,    # Allow $220 max inventory (3x leverage)
-        capital=73.0,               # $73 account
-        roc_threshold_bps=3.0,      # Increased - market too volatile at 1.0
-        min_pause_duration=15,      # v8: 15s pause duration
+        max_inventory_pct=100.0,    # v10: lower leverage
+        capital=105.0,              # $105 account
+        roc_threshold_bps=50.0,     # v10: real trends only per Qwen
+        min_pause_duration=300,     # v10: 5 min pause per Qwen
     )
     mm.run()
 
