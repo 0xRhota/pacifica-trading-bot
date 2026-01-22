@@ -1,11 +1,25 @@
 #!/usr/bin/env python3
 """
 Grid Market Maker for Hibachi DEX
-Same strategy as Paradex Grid MM - place limit orders on both sides
+High-volume limit order strategy to farm early platform points
 
 Strategy: Place limit orders on both sides of mid price
-- Earns spread when both sides fill
-- Uses ROC trend detection to pause orders during strong moves
+- Uses LIMIT orders (maker) to get 0% fee vs 0.045% taker
+- Wide spread (20 bps) to ensure orders rest on book since no POST_ONLY
+- ROC threshold for trend detection (pause in volatile markets)
+- Conservative sizing for $60 balance
+
+Hibachi Fee Structure:
+- Maker: 0.000% (FREE!)
+- Taker: 0.045%
+- Goal: Farm volume with limit orders for points + zero fees
+
+Parameters (aggressive volume farming):
+- Asset: BTC-PERP (lower volatility than ETH)
+- Spread: 20 bps (wide since no POST_ONLY)
+- Order Size: $50 per order (matches Nado style)
+- Levels: 3 per side ($150 per side)
+- Refresh: 30 seconds
 """
 
 import os
@@ -13,16 +27,21 @@ import sys
 import time
 import asyncio
 import logging
-from decimal import Decimal
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from datetime import datetime
+from typing import Dict, Optional
 from collections import deque
-from dotenv import load_dotenv
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(os.path.join(project_root, '.env'))
+# Load env
+env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
+if os.path.exists(env_path):
+    with open(env_path) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                key, val = line.split('=', 1)
+                os.environ[key] = val.strip('"').strip("'")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,34 +56,33 @@ from dexes.hibachi.hibachi_sdk import HibachiSDK
 class HibachiGridMM:
     """
     Grid Market Maker for Hibachi DEX
-    Places limit orders on both sides to earn spread
+    Places limit orders on both sides for volume farming + spread capture
     """
 
     def __init__(
         self,
-        symbol: str = "ETH/USDT-P",
-        base_spread_bps: float = 2.0,       # 2 bps spread (Hibachi has fees)
-        order_size_usd: float = 100.0,      # $100 per order
-        num_levels: int = 2,                # 2 levels per side
-        max_inventory_pct: float = 300.0,   # Allow 3x leverage
-        capital: float = 70.0,              # ~$70 account
-        roc_threshold_bps: float = 5.0,     # Pause on 5 bps move (more conservative)
-        min_pause_duration: int = 30,       # 30 second pause
+        symbol: str = "BTC/USDT-P",
+        base_spread_bps: float = 20.0,      # Wide spread since no POST_ONLY
+        order_size_usd: float = 100.0,      # $100 orders (matches Nado)
+        num_levels: int = 3,                # 3 levels per side = $150 per side
+        max_position_usd: float = 250.0,    # Max $250 position (reduced to share margin with LLM Supervisor)
+        roc_threshold_bps: float = 10.0,    # Pause on trend
+        min_pause_duration: int = 20,       # 20 second pause
+        refresh_interval: float = 30.0,     # Refresh grid every 30 seconds
     ):
         self.symbol = symbol
         self.base_spread_bps = base_spread_bps
         self.order_size_usd = order_size_usd
         self.num_levels = num_levels
-        self.max_inventory_pct = max_inventory_pct
-        self.capital = capital
+        self.max_position_usd = max_position_usd
         self.roc_threshold_bps = roc_threshold_bps
         self.min_pause_duration = min_pause_duration
+        self.refresh_interval = refresh_interval
 
         # State
-        self.client = None
-        self.grid_center = None
-        self.open_orders: Dict[str, Dict] = {}
+        self.sdk: Optional[HibachiSDK] = None
         self.price_history: deque = deque(maxlen=30)
+        self.open_orders: Dict[str, Dict] = {}
 
         # Trend detection
         self.orders_paused = False
@@ -76,150 +94,153 @@ class HibachiGridMM:
         self.fills_count = 0
         self.start_time = None
         self.initial_balance = 0.0
-        self.current_balance = 0.0
 
-        # Position tracking
-        self.position_size = 0.0
-        self.position_notional = 0.0
-
-        # Market info
-        self.tick_size = 0.01
-        self.step_size = 0.0001
-        self.min_notional = 10.0
+        # Market info (BTC)
+        self.tick_size = 0.1  # BTC tick size on Hibachi
+        self.min_size = 0.0001  # ~$9 at 90k
+        self.min_notional = 1.0  # $1 min notional
 
     async def initialize(self):
-        """Initialize Hibachi client"""
+        """Initialize Hibachi SDK and get market info"""
         logger.info("=" * 70)
-        logger.info("HIBACHI GRID MARKET MAKER - LIVE TRADING")
+        logger.info("HIBACHI GRID MARKET MAKER - VOLUME FARMING")
         logger.info("=" * 70)
         logger.info(f"Symbol: {self.symbol}")
-        logger.info(f"Spread: {self.base_spread_bps} bps")
+        logger.info(f"Spread: {self.base_spread_bps} bps (wide - no POST_ONLY)")
         logger.info(f"Order Size: ${self.order_size_usd}")
         logger.info(f"Levels: {self.num_levels} per side")
-        logger.info(f"Capital: ${self.capital}")
-        logger.info(f"Max Inventory: {self.max_inventory_pct}%")
+        logger.info(f"Max Position: ${self.max_position_usd}")
         logger.info(f"ROC Threshold: {self.roc_threshold_bps} bps")
+        logger.info(f"Refresh Interval: {self.refresh_interval}s")
+        logger.info(f"Fees: 0% maker / 0.045% taker")
         logger.info("=" * 70)
 
-        # Initialize client
-        api_key = os.getenv("HIBACHI_PUBLIC_KEY")
-        api_secret = os.getenv("HIBACHI_PRIVATE_KEY")
-        account_id = os.getenv("HIBACHI_ACCOUNT_ID")
+        # Initialize SDK
+        api_key = os.getenv('HIBACHI_PUBLIC_KEY')
+        api_secret = os.getenv('HIBACHI_PRIVATE_KEY')
+        account_id = os.getenv('HIBACHI_ACCOUNT_ID')
 
-        if not all([api_key, api_secret, account_id]):
-            logger.error("Missing Hibachi credentials in .env")
-            return False
+        if not api_key or not api_secret or not account_id:
+            raise ValueError("HIBACHI_PUBLIC_KEY, HIBACHI_PRIVATE_KEY, HIBACHI_ACCOUNT_ID required")
 
-        logger.info("Connecting to Hibachi...")
-        self.client = HibachiSDK(
-            api_key=api_key,
-            api_secret=api_secret,
-            account_id=account_id
-        )
+        self.sdk = HibachiSDK(api_key, api_secret, account_id)
 
-        # Get account balance
-        try:
-            account = await self.client.get_account_info()
-            if account:
-                self.initial_balance = float(account.get('equity', account.get('balance', 0)))
-                self.current_balance = self.initial_balance
-                logger.info(f"Account balance: ${self.initial_balance:.2f}")
-        except Exception as e:
-            logger.error(f"Failed to get account: {e}")
-            return False
+        # Get balance
+        balance = await self.sdk.get_balance()
+        self.initial_balance = balance or 0
+        logger.info(f"Account balance: ${self.initial_balance:.2f}")
 
         # Get market info
-        try:
-            market = await self.client.get_market_info(self.symbol)
-            if market:
-                self.tick_size = float(market.get('tickSize', 0.01))
-                self.step_size = float(market.get('stepSize', 0.0001))
-                logger.info(f"Market: tick={self.tick_size}, step={self.step_size}")
-        except Exception as e:
-            logger.warning(f"Could not get market info: {e}")
+        market_info = await self.sdk.get_market_info(self.symbol)
+        if market_info:
+            self.tick_size = float(market_info.get('tickSize', 0.1))
+            self.min_size = float(market_info.get('minOrderSize', 0.0001))
+            self.min_notional = float(market_info.get('minNotional', 1.0))
+            logger.info(f"Market: tick={self.tick_size}, min_size={self.min_size}, min_notional=${self.min_notional}")
 
-        # Get initial price - try orderbook first, then price endpoint
-        try:
-            orderbook = await self.client.get_orderbook(self.symbol)
-            if orderbook:
-                # Try different response formats
-                bids = orderbook.get('bids') or orderbook.get('buy') or []
-                asks = orderbook.get('asks') or orderbook.get('sell') or []
-
-                if bids and asks:
-                    # Handle both [[price, size]] and [{price, size}] formats
-                    if isinstance(bids[0], list):
-                        bid = float(bids[0][0])
-                        ask = float(asks[0][0])
-                    elif isinstance(bids[0], dict):
-                        bid = float(bids[0].get('price', 0))
-                        ask = float(asks[0].get('price', 0))
-                    else:
-                        bid = float(bids[0])
-                        ask = float(asks[0])
-
-                    if bid > 0 and ask > 0:
-                        self.grid_center = (bid + ask) / 2
-                        logger.info(f"Initial price: ${self.grid_center:,.2f} (bid: ${bid:,.2f}, ask: ${ask:,.2f})")
-        except Exception as e:
-            logger.warning(f"Orderbook error: {e}")
-
-        # Fallback to price endpoint
-        if not self.grid_center:
-            try:
-                price = await self.client.get_price(self.symbol)
-                if price and price > 0:
-                    self.grid_center = price
-                    logger.info(f"Initial price (from ticker): ${self.grid_center:,.2f}")
-            except Exception as e:
-                logger.warning(f"Price endpoint error: {e}")
-
-        if not self.grid_center:
-            logger.error("Could not determine initial price")
-            return False
+        # Get initial price
+        mid = await self._get_mid_price()
+        if not mid:
+            raise Exception("Cannot get initial price")
+        logger.info(f"Initial price: ${mid:,.2f}")
+        self.price_history.append(mid)
 
         self.start_time = datetime.now()
         return True
 
-    def _round_price(self, price: float) -> Decimal:
-        """Round price to tick size"""
-        return Decimal(str(round(price / self.tick_size) * self.tick_size))
+    async def _get_mid_price(self) -> Optional[float]:
+        """Get current mid price from Hibachi"""
+        try:
+            orderbook = await self.sdk.get_orderbook(self.symbol)
+            if not orderbook:
+                return None
 
-    def _round_size(self, size: float) -> Decimal:
-        """Round size to step size"""
-        return Decimal(str(round(size / self.step_size) * self.step_size))
+            bid_levels = orderbook.get('bid', {}).get('levels', [])
+            ask_levels = orderbook.get('ask', {}).get('levels', [])
+
+            if not bid_levels or not ask_levels:
+                return None
+
+            best_bid = float(bid_levels[0]['price'])
+            best_ask = float(ask_levels[0]['price'])
+            return (best_bid + best_ask) / 2
+        except Exception as e:
+            logger.error(f"Error getting mid price: {e}")
+        return None
+
+    def _round_price(self, price: float) -> float:
+        """Round price to tick size"""
+        ticks = round(price / self.tick_size)
+        return round(ticks * self.tick_size, 6)
+
+    def _round_size(self, size: float, price: float) -> float:
+        """Round size to step size, ensuring min_notional is met"""
+        # Ensure notional >= min_notional (with 10% buffer)
+        min_size_for_notional = (self.min_notional * 1.1) / price
+        size = max(size, min_size_for_notional, self.min_size)
+
+        # Round to 4 decimal places for BTC
+        return round(size, 4)
 
     def _calculate_roc(self) -> float:
-        """Calculate rate of change in basis points"""
+        """Calculate Rate of Change in bps over ~30 samples"""
         if len(self.price_history) < 10:
             return 0.0
-        old_price = self.price_history[0]
-        new_price = self.price_history[-1]
-        if old_price == 0:
+        prices = list(self.price_history)
+        current = prices[-1]
+        past = prices[-10]
+        if past == 0:
             return 0.0
-        return (new_price - old_price) / old_price * 10000
+        return (current - past) / past * 10000
+
+    def _calculate_dynamic_spread(self, roc: float) -> float:
+        """
+        Calculate dynamic spread based on ROC (volatility).
+
+        HIB-003 (2026-01-22): Reduced spreads by 20% for more fills.
+        Analysis showed orders being cancelled before fills with 10-25 bps.
+        CLAUDE.md confirms: "Wider Grid MM spreads DON'T work (v2-v4 proved it)"
+
+        Spread bands (reduced 20% from previous):
+        | ROC (abs) | Spread | Rationale |
+        |-----------|--------|-----------|
+        | 0-5 bps   | 8 bps  | Calm market, tight for fills |
+        | 5-10 bps  | 12 bps | Low volatility |
+        | 10-20 bps | 16 bps | Moderate volatility |
+        | > 20 bps  | 20 bps | High vol, still tighter |
+        """
+        abs_roc = abs(roc)
+        if abs_roc < 5:
+            spread = 8.0   # Calm (was 10)
+        elif abs_roc < 10:
+            spread = 12.0  # Low vol (was 15)
+        elif abs_roc < 20:
+            spread = 16.0  # Moderate vol (was 20)
+        else:
+            spread = 20.0  # High vol (was 25)
+        return spread
 
     def _update_pause_state(self, roc: float):
-        """Update order pause state based on ROC"""
+        """Update order pause state based on trend"""
         old_paused = self.orders_paused
-        old_side = self.pause_side
 
-        # Strong trend - pause ALL orders
-        if abs(roc) > self.roc_threshold_bps * 2:
+        strong_threshold = self.roc_threshold_bps * 2.0
+
+        if abs(roc) > strong_threshold:
             if not self.orders_paused or self.pause_side != 'ALL':
                 self.pause_start_time = datetime.now()
             self.orders_paused = True
             self.pause_side = 'ALL'
             direction = "UP" if roc > 0 else "DOWN"
-            if not old_paused or old_side != 'ALL':
+            if not old_paused:
                 logger.warning(f"  STRONG TREND {direction} - PAUSE ALL (ROC: {roc:+.2f} bps)")
         elif roc > self.roc_threshold_bps:
-            if not self.orders_paused or self.pause_side != 'SELL':
+            if not self.orders_paused:
                 self.pause_start_time = datetime.now()
             self.orders_paused = True
             self.pause_side = 'SELL'
         elif roc < -self.roc_threshold_bps:
-            if not self.orders_paused or self.pause_side != 'BUY':
+            if not self.orders_paused:
                 self.pause_start_time = datetime.now()
             self.orders_paused = True
             self.pause_side = 'BUY'
@@ -229,299 +250,192 @@ class HibachiGridMM:
                 if elapsed >= self.min_pause_duration:
                     self.orders_paused = False
                     self.pause_side = None
-                    self.pause_start_time = None
-            else:
-                self.orders_paused = False
-                self.pause_side = None
+                    if old_paused:
+                        logger.info(f"  RESUME orders (ROC: {roc:+.2f} bps)")
 
-        if self.orders_paused and not old_paused and self.pause_side != 'ALL':
-            logger.info(f"  PAUSE {self.pause_side} orders (ROC: {roc:+.2f} bps)")
-        elif not self.orders_paused and old_paused:
-            logger.info(f"  RESUME orders (ROC: {roc:+.2f} bps)")
+    async def _get_position(self) -> float:
+        """Get current position size in USD"""
+        try:
+            pos_size = await self.sdk.get_position_size(self.symbol)
+            mid = await self._get_mid_price()
+            if mid:
+                return abs(pos_size) * mid
+            return 0.0
+        except Exception as e:
+            logger.error(f"Error getting position: {e}")
+            return 0.0
 
     async def _cancel_all_orders(self):
         """Cancel all open orders"""
         try:
-            orders = await self.client.get_orders(self.symbol)
-            if orders:
-                for order in orders:
-                    order_id = order.get('orderId')
-                    if order_id:
-                        try:
-                            await self.client.cancel_order(order_id)
-                        except Exception as e:
-                            logger.debug(f"Cancel error: {e}")
+            cancelled = await self.sdk.cancel_all_orders(self.symbol)
             self.open_orders.clear()
+            return cancelled
         except Exception as e:
-            logger.error(f"Cancel all orders error: {e}")
+            logger.error(f"Cancel error: {e}")
+            self.open_orders.clear()
+            return 0
 
-    async def _place_grid_orders(self, mid_price: float):
-        """Place grid of limit orders"""
-        # First cancel existing orders
-        await self._cancel_all_orders()
-
-        if self.orders_paused and self.pause_side == 'ALL':
-            logger.info(f"  Grid SKIPPED: Strong trend, all orders paused")
-            return
-
-        spread_pct = self.base_spread_bps / 10000
-        max_inventory = self.capital * (self.max_inventory_pct / 100)
-
+    async def _place_grid_orders(self, mid_price: float, roc: float = 0.0):
+        """Place limit orders on both sides of mid price with dynamic spread"""
         orders_placed = 0
 
-        # Place BUY orders (below mid)
-        if not (self.orders_paused and self.pause_side == 'BUY'):
-            for i in range(1, self.num_levels + 1):
-                price = mid_price * (1 - spread_pct * i)
-                price_dec = float(self._round_price(price))
+        # Check position limit
+        current_position = await self._get_position()
+        if current_position >= self.max_position_usd:
+            logger.warning(f"  Max position reached: ${current_position:.2f} >= ${self.max_position_usd}")
+            return 0
 
-                size = self.order_size_usd / price_dec
-                size_dec = float(self._round_size(size))
+        # Use dynamic spread based on ROC volatility
+        dynamic_spread = self._calculate_dynamic_spread(roc)
 
-                actual_notional = price_dec * size_dec
-                if actual_notional < self.min_notional:
-                    continue
+        for level in range(1, self.num_levels + 1):
+            # Spread increases with level, using dynamic base spread
+            spread_multiplier = level * dynamic_spread / 10000
 
+            # Calculate order size in base currency
+            size = self._round_size(self.order_size_usd / mid_price, mid_price)
+
+            # BUY order (below mid)
+            if not self.orders_paused or self.pause_side not in ['BUY', 'ALL']:
+                buy_price = self._round_price(mid_price * (1 - spread_multiplier))
                 try:
-                    result = await self.client.create_limit_order(
+                    result = await self.sdk.create_limit_order(
                         symbol=self.symbol,
                         is_buy=True,
-                        amount=size_dec,
-                        price=price_dec
+                        amount=size,
+                        price=buy_price
                     )
-                    if result and not result.get('error'):
-                        order_id = result.get('orderId', f'buy_{i}')
-                        self.open_orders[order_id] = {
-                            'side': 'BUY',
-                            'price': price_dec,
-                            'size': size_dec,
-                            'level': i
-                        }
+                    if result and 'orderId' in result:
                         orders_placed += 1
+                        self.open_orders[result.get('orderId', str(time.time()))] = {
+                            'side': 'BUY',
+                            'price': buy_price,
+                            'size': size
+                        }
+                        logger.debug(f"  BUY {size:.4f} @ ${buy_price:,.2f}")
                 except Exception as e:
-                    logger.warning(f"BUY error L{i}: {e}"[:80])
+                    logger.debug(f"Buy order error: {e}")
 
-        # Place SELL orders (above mid)
-        if not (self.orders_paused and self.pause_side == 'SELL'):
-            for i in range(1, self.num_levels + 1):
-                price = mid_price * (1 + spread_pct * i)
-                price_dec = float(self._round_price(price))
-
-                size = self.order_size_usd / price_dec
-                size_dec = float(self._round_size(size))
-
-                actual_notional = price_dec * size_dec
-                if actual_notional < self.min_notional:
-                    continue
-
+            # SELL order (above mid)
+            if not self.orders_paused or self.pause_side not in ['SELL', 'ALL']:
+                sell_price = self._round_price(mid_price * (1 + spread_multiplier))
                 try:
-                    result = await self.client.create_limit_order(
+                    result = await self.sdk.create_limit_order(
                         symbol=self.symbol,
                         is_buy=False,
-                        amount=size_dec,
-                        price=price_dec
+                        amount=size,
+                        price=sell_price
                     )
-                    if result and not result.get('error'):
-                        order_id = result.get('orderId', f'sell_{i}')
-                        self.open_orders[order_id] = {
-                            'side': 'SELL',
-                            'price': price_dec,
-                            'size': size_dec,
-                            'level': i
-                        }
+                    if result and 'orderId' in result:
                         orders_placed += 1
+                        self.open_orders[result.get('orderId', str(time.time()))] = {
+                            'side': 'SELL',
+                            'price': sell_price,
+                            'size': size
+                        }
+                        logger.debug(f"  SELL {size:.4f} @ ${sell_price:,.2f}")
                 except Exception as e:
-                    logger.warning(f"SELL error L{i}: {e}"[:80])
+                    logger.debug(f"Sell order error: {e}")
 
-        self.grid_center = mid_price
-        if orders_placed > 0:
-            logger.info(f"  Grid: {orders_placed} orders placed around ${mid_price:,.2f}")
+        return orders_placed
 
-    async def _check_fills(self) -> int:
-        """Check for filled orders"""
-        fills = 0
-        try:
-            orders = await self.client.get_orders(self.symbol)
-            exchange_order_ids = set()
+    async def run_cycle(self):
+        """Run one grid cycle"""
+        # Get current price
+        mid = await self._get_mid_price()
+        if not mid:
+            logger.warning("Cannot get price, skipping cycle")
+            return
 
-            if orders:
-                for order in orders:
-                    order_id = order.get('orderId')
-                    status = order.get('status', '').upper()
+        self.price_history.append(mid)
 
-                    if status in ['OPEN', 'NEW', 'PARTIAL']:
-                        exchange_order_ids.add(order_id)
+        # Calculate ROC and update pause state
+        roc = self._calculate_roc()
+        self._update_pause_state(roc)
 
-                    if order_id in self.open_orders and status in ['FILLED', 'CLOSED']:
-                        info = self.open_orders[order_id]
-                        filled_size = float(order.get('filledQuantity', info['size']))
-                        fill_price = float(order.get('avgPrice', info['price']))
+        # Cancel existing orders
+        await self._cancel_all_orders()
 
-                        notional = filled_size * fill_price
-                        self.total_volume += notional
-                        self.fills_count += 1
-                        fills += 1
-
-                        logger.info(f"  FILL: {info['side']} {filled_size:.6f} @ ${fill_price:,.2f} (${notional:,.2f})")
-                        del self.open_orders[order_id]
-
-            # Sync: remove stale orders
-            stale = [oid for oid in self.open_orders if oid not in exchange_order_ids]
-            for oid in stale:
-                del self.open_orders[oid]
-
-        except Exception as e:
-            logger.error(f"Check fills error: {e}")
-
-        return fills
-
-    async def _sync_position(self):
-        """Sync position from exchange"""
-        try:
-            positions = await self.client.get_positions()
-            if positions:
-                for pos in positions:
-                    if pos.get('symbol') == self.symbol:
-                        self.position_size = float(pos.get('size', 0))
-                        entry_price = float(pos.get('entryPrice', 0))
-                        self.position_notional = abs(self.position_size * entry_price)
-                        return
-            self.position_size = 0.0
-            self.position_notional = 0.0
-        except Exception as e:
-            logger.debug(f"Sync position error: {e}")
+        # Place new grid with dynamic spread
+        if not self.orders_paused or self.pause_side != 'ALL':
+            orders_placed = await self._place_grid_orders(mid, roc)
+            dynamic_spread = self._calculate_dynamic_spread(roc)
+            pause_info = f" (paused: {self.pause_side})" if self.orders_paused else ""
+            logger.info(
+                f"Grid @ ${mid:,.2f} | ROC: {roc:+.2f} bps | Spread: {dynamic_spread:.0f} bps | "
+                f"Orders: {orders_placed}{pause_info}"
+            )
+        else:
+            logger.info(f"Grid PAUSED @ ${mid:,.2f} | ROC: {roc:+.2f} bps")
 
     async def run(self):
-        """Main trading loop"""
-        try:
-            if not await self.initialize():
-                return
+        """Main run loop"""
+        logger.info("Starting Hibachi Grid MM loop...")
+        logger.info(f"Refresh every {self.refresh_interval}s")
 
-            cycle = 0
-            grid_reset_pct = 0.25
+        cycle_count = 0
+        while True:
+            try:
+                await self.run_cycle()
+                cycle_count += 1
 
-            logger.info(f"\nStarting live trading...")
-            logger.info("-" * 70)
-
-            # Place initial grid
-            await self._place_grid_orders(self.grid_center)
-
-            while True:
-                cycle += 1
-
-                # Get current orderbook
-                try:
-                    orderbook = await self.client.get_orderbook(self.symbol)
-                    if not orderbook:
-                        await asyncio.sleep(2)
-                        continue
-
-                    bids = orderbook.get('bids', [])
-                    asks = orderbook.get('asks', [])
-                    if not bids or not asks:
-                        await asyncio.sleep(2)
-                        continue
-
-                    bid = float(bids[0][0])
-                    ask = float(asks[0][0])
-                    mid = (bid + ask) / 2
-                    spread_bps = (ask - bid) / mid * 10000
-
-                except Exception as e:
-                    logger.warning(f"Orderbook error: {e}")
-                    await asyncio.sleep(2)
-                    continue
-
-                self.price_history.append(mid)
-
-                # Calculate ROC and update pause state
-                roc = self._calculate_roc()
-                self._update_pause_state(roc)
-
-                # Check for fills
-                fills = await self._check_fills()
-
-                # Refresh grid on price move or fills
-                price_move_pct = abs(mid - self.grid_center) / self.grid_center * 100 if self.grid_center else 0
-
-                no_tracked_orders = len(self.open_orders) == 0
-                not_fully_paused = not (self.orders_paused and self.pause_side == 'ALL')
-
-                should_refresh = (
-                    fills > 0 or
-                    price_move_pct >= grid_reset_pct or
-                    (no_tracked_orders and not_fully_paused)
-                )
-
-                if should_refresh:
-                    if price_move_pct >= grid_reset_pct:
-                        logger.info(f"  Grid reset: price moved {price_move_pct:.3f}%")
-                    elif no_tracked_orders and not_fully_paused:
-                        logger.info(f"  Grid reset: no active orders")
-                    await self._sync_position()
-                    await self._place_grid_orders(mid)
-
-                # Status log every 30 seconds
-                if cycle % 30 == 0:
-                    try:
-                        account = await self.client.get_account_info()
-                        if account:
-                            self.current_balance = float(account.get('equity', self.current_balance))
-                    except:
-                        pass
-
-                    pnl = self.current_balance - self.initial_balance
+                # Log stats every 30 cycles
+                if cycle_count % 30 == 0:
                     elapsed = (datetime.now() - self.start_time).total_seconds() / 60
-                    pause_status = f"PAUSE-{self.pause_side}" if self.orders_paused else "LIVE"
+                    balance = await self.sdk.get_balance() or 0
+                    pnl = balance - self.initial_balance
+                    logger.info(
+                        f"Stats: {cycle_count} cycles in {elapsed:.1f} min | "
+                        f"Balance: ${balance:.2f} | PnL: ${pnl:+.2f}"
+                    )
 
-                    logger.info(f"\n[{elapsed:.1f}m] ${mid:,.2f} | Spread: {spread_bps:.1f}bps | ROC: {roc:+.1f}bps | {pause_status}")
-                    logger.info(f"  Volume: ${self.total_volume:,.2f} | Fills: {self.fills_count}")
-                    logger.info(f"  P&L: ${pnl:+.2f} (${self.current_balance:.2f})")
+                await asyncio.sleep(self.refresh_interval)
 
-                await asyncio.sleep(1)
+            except KeyboardInterrupt:
+                logger.info("Shutting down...")
+                await self._cancel_all_orders()
+                break
+            except Exception as e:
+                logger.error(f"Cycle error: {e}")
+                await asyncio.sleep(5)
 
-        except KeyboardInterrupt:
-            logger.info("\nStopping by user request...")
-        except Exception as e:
-            logger.error(f"Error: {e}")
-            import traceback
-            traceback.print_exc()
-        finally:
-            logger.info("\nCleaning up - canceling open orders...")
-            await self._cancel_all_orders()
-            self._print_report()
-
-    def _print_report(self):
-        """Print final report"""
-        elapsed = (datetime.now() - self.start_time).total_seconds() / 60 if self.start_time else 0
-        pnl = self.current_balance - self.initial_balance
-
-        logger.info("\n" + "=" * 70)
-        logger.info("HIBACHI GRID MM - FINAL REPORT")
-        logger.info("=" * 70)
-        logger.info(f"Duration: {elapsed:.1f} minutes")
-        logger.info(f"Total Volume: ${self.total_volume:,.2f}")
-        logger.info(f"Total Fills: {self.fills_count}")
-        logger.info(f"P&L: ${pnl:+.2f}")
-        logger.info("=" * 70)
+    async def shutdown(self):
+        """Clean shutdown"""
+        logger.info("Cancelling all orders...")
+        await self._cancel_all_orders()
+        logger.info("Shutdown complete")
 
 
-def main():
-    """
-    Hibachi Grid MM - same strategy as Paradex
-    """
+async def main():
+    """Main entry point"""
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--symbol', default='BTC/USDT-P', help='Trading symbol')
+    parser.add_argument('--spread', type=float, default=20.0, help='Spread in bps (20 recommended for no POST_ONLY)')
+    parser.add_argument('--size', type=float, default=100.0, help='Order size in USD')
+    parser.add_argument('--levels', type=int, default=3, help='Levels per side')
+    parser.add_argument('--refresh', type=float, default=30.0, help='Refresh interval')
+    parser.add_argument('--max-position', type=float, default=500.0, help='Max position in USD')
+    args = parser.parse_args()
+
     mm = HibachiGridMM(
-        symbol="ETH/USDT-P",           # ETH on Hibachi
-        base_spread_bps=2.0,           # 2 bps spread
-        order_size_usd=100.0,          # $100 per order
-        num_levels=2,                  # 2 levels per side = $200 per side
-        max_inventory_pct=300.0,       # Allow $210 max inventory
-        capital=70.0,                  # ~$70 account
-        roc_threshold_bps=5.0,         # More conservative ROC threshold
-        min_pause_duration=30,         # 30s pause
+        symbol=args.symbol,
+        base_spread_bps=args.spread,
+        order_size_usd=args.size,
+        num_levels=args.levels,
+        refresh_interval=args.refresh,
+        max_position_usd=args.max_position,
     )
-    asyncio.run(mm.run())
+
+    try:
+        await mm.initialize()
+        await mm.run()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        await mm.shutdown()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
