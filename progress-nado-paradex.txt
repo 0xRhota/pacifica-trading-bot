@@ -1,0 +1,65 @@
+## Codebase Patterns - Nado/Paradex
+
+- Nado Grid MM: `scripts/grid_mm_nado_v8.py` - v15 with time-based refresh
+- Paradex Grid MM: `scripts/grid_mm_live.py` - v12 with time-based refresh
+- Both use POST_ONLY orders for maker fills
+- Dynamic spread calculated in `_calculate_dynamic_spread()`
+- Tests: `tests/test_dynamic_spread.py`
+
+---
+
+## 2026-01-22 - Fixes Applied
+
+**US-001 (Nado time-based refresh) - COMPLETE:**
+- Added 5-minute time-based refresh
+- Moved spread calculation outside _place_grid_orders()
+- Spread now updates every cycle
+
+**US-002 (Paradex time-based refresh) - COMPLETE:**
+- Applied same fix to Paradex
+- Both bots now have time-based refresh
+
+**Remaining Issues:**
+- ~~Stale order detection needed (orders can drift >0.2% from mid)~~ FIXED in NP-001
+- ~~Nado has liquidity issues (100% inventory, no buyers)~~ FIXED in NP-003
+- ~~Need to verify fixes result in actual fills~~ Ready for verification
+
+---
+
+## 2026-01-22 - NP Fixes Applied (Ralph Session)
+
+**NP-001 (Stale order detection) - COMPLETE:**
+- Added `_check_stale_orders()` method to both scripts
+- Detects orders >0.2% from mid price
+- Triggers immediate refresh when stale orders detected
+- Log shows 'Stale order refresh: order at $X is Y% from mid'
+
+**NP-002 (Tight spread mode) - COMPLETE:**
+- Track consecutive low-ROC cycles (ROC < 2bps)
+- After 2 minutes of low ROC, reduce spread by 20%
+- Log shows 'TIGHT_SPREAD mode: spread reduced to Xbps'
+- Reverts to normal spread when ROC > 5bps
+
+**NP-003 (Inventory rebalancing) - COMPLETE (Nado only):**
+- Track time at max inventory (>=95%)
+- After 15 minutes at max inventory with 0 fills, close 25% via market order
+- Log shows 'Inventory rebalance: closing 25% position'
+- Limited to once per hour
+
+**NP-004 (Fill rate monitoring) - COMPLETE:**
+- Track fills per hour metric
+- Fill rate shown in status output (e.g., "Fills: 5 (2.1/hr)")
+- Alert if 0 fills for >30 minutes
+
+**NP-005 (Verification) - READY:**
+- All code changes implemented
+- Run bots for 1 hour to verify fills
+- Commands:
+  - Nado: `nohup python3 scripts/grid_mm_nado_v8.py > logs/nado.log 2>&1 &`
+  - Paradex: `nohup python3 scripts/grid_mm_live.py > logs/paradex.log 2>&1 &`
+
+**Current versions:**
+- Nado: v17 (grid_mm_nado_v8.py)
+- Paradex: v17 (grid_mm_live.py)
+
+---
