@@ -387,3 +387,91 @@ class SelfLearning:
             return f"AVOID: {symbol} has only {stats['win_rate']:.0%} win rate ({stats['total']} trades)"
         else:
             return None
+
+    def get_blocked_symbols(self, hours: int = 168, min_trades: int = 10, block_threshold: float = 0.30) -> Dict[str, Dict]:
+        """
+        HIB-004: Get symbols that should be blocked due to poor performance.
+
+        Args:
+            hours: Lookback period (default: 7 days)
+            min_trades: Minimum trades required before blocking (default: 10)
+            block_threshold: Win rate below which to block (default: 30%)
+
+        Returns:
+            Dict mapping symbol -> {win_rate, total_trades, total_pnl}
+        """
+        perf = self.analyze_symbol_performance(hours)
+        blocked = {}
+
+        for symbol, stats in perf.items():
+            if stats['total'] >= min_trades and stats['win_rate'] < block_threshold:
+                blocked[symbol] = {
+                    'win_rate': stats['win_rate'],
+                    'total_trades': stats['total'],
+                    'total_pnl': stats['total_pnl']
+                }
+
+        return blocked
+
+    def is_symbol_blocked(self, symbol: str, hours: int = 168, min_trades: int = 10, block_threshold: float = 0.30) -> Tuple[bool, Optional[str]]:
+        """
+        HIB-004: Check if a specific symbol is blocked due to poor performance.
+
+        Args:
+            symbol: Symbol to check
+            hours: Lookback period
+            min_trades: Minimum trades required
+            block_threshold: Win rate threshold for blocking
+
+        Returns:
+            Tuple of (is_blocked: bool, reason: Optional[str])
+        """
+        blocked = self.get_blocked_symbols(hours, min_trades, block_threshold)
+
+        if symbol in blocked:
+            stats = blocked[symbol]
+            reason = (f"BLOCKED: {symbol} has {stats['win_rate']:.0%} win rate over "
+                     f"{stats['total_trades']} trades (PnL: ${stats['total_pnl']:.2f})")
+            return True, reason
+
+        return False, None
+
+    def log_win_rate_summary(self, hours: int = 168) -> str:
+        """
+        HIB-004: Generate a summary of win rates per asset for logging.
+
+        Returns:
+            Formatted string for logging
+        """
+        perf = self.analyze_symbol_performance(hours)
+        blocked = self.get_blocked_symbols(hours)
+
+        lines = []
+        lines.append("=" * 60)
+        lines.append("📊 WIN RATE SUMMARY BY ASSET")
+        lines.append("=" * 60)
+
+        # Sort by total trades (most active first)
+        sorted_symbols = sorted(perf.items(), key=lambda x: x[1]['total'], reverse=True)
+
+        for symbol, stats in sorted_symbols:
+            status = ""
+            if symbol in blocked:
+                status = " ⛔ BLOCKED"
+            elif stats['win_rate'] < 0.40 and stats['total'] >= 5:
+                status = " ⚠️ WATCH"
+            elif stats['win_rate'] >= 0.50:
+                status = " ✅"
+
+            lines.append(
+                f"  {symbol}: {stats['win_rate']:.0%} WR ({stats['wins']}/{stats['total']} trades, "
+                f"${stats['total_pnl']:+.2f}){status}"
+            )
+
+        if blocked:
+            lines.append("")
+            lines.append(f"🚫 {len(blocked)} symbol(s) BLOCKED (<30% WR with 10+ trades)")
+
+        lines.append("=" * 60)
+
+        return "\n".join(lines)

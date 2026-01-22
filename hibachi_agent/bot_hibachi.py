@@ -390,6 +390,13 @@ class HibachiTradingBot:
         logger.info("📚 SELF-LEARNING CHECK-IN (30-min cycle)")
         logger.info("=" * 60)
 
+        # HIB-004: Log win rate summary per asset
+        win_rate_summary = self.self_learning.log_win_rate_summary(hours=168)
+        if win_rate_summary:
+            for line in win_rate_summary.split('\n'):
+                if line.strip():
+                    logger.info(f"  {line}")
+
         # Generate learning context with performance insights and user notes
         context = self.self_learning.generate_learning_context(hours=168)  # Last 7 days
         if context:
@@ -1182,6 +1189,18 @@ class HibachiTradingBot:
                     logger.info(f"   Regime: {trade_params['regime']} | "
                                f"Stop: {trade_params['stop_loss_pct']:.1f}% | "
                                f"Size: ${decision['position_size_usd']:.2f}")
+
+                # ═══════════════════════════════════════════════════════════════
+                # HIB-004: BLOCK ASSETS WITH <30% WIN RATE (2026-01-22)
+                # Protect capital by auto-blocking consistently losing assets
+                # ═══════════════════════════════════════════════════════════════
+                if action in ["LONG", "SHORT"]:
+                    is_blocked, block_reason = self.self_learning.is_symbol_blocked(
+                        symbol, hours=168, min_trades=10, block_threshold=0.30
+                    )
+                    if is_blocked:
+                        logger.warning(f"  ⛔ {block_reason}")
+                        continue  # Skip this decision
 
                 # ═══════════════════════════════════════════════════════════════
                 # HIB-001: MOMENTUM CONFIRMATION (2026-01-22)
