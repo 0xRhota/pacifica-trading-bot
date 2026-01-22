@@ -77,12 +77,84 @@ class FastExitMonitor:
         self.last_check_time = None
         self.running = False
 
+        # HIB-002: Trailing stop tracking
+        # Maps symbol -> {'breakeven_activated': bool, 'trailing_stop_pct': float, 'peak_pnl_pct': float}
+        self.trailing_stops: Dict[str, Dict] = {}
+
+        # Trailing stop thresholds
+        self.BREAKEVEN_TRIGGER_PCT = 4.0   # Move to breakeven at +4%
+        self.TRAILING_TRIGGER_PCT = 6.0    # Start trailing at +6%
+        self.TRAILING_DISTANCE_PCT = 2.0   # Trail 2% below peak
+
         logger.info("=" * 60)
         logger.info(f"FAST EXIT MONITOR: {self.MONITOR_NAME}")
         logger.info(f"  Check Interval: {self.CHECK_INTERVAL_SECONDS}s")
         logger.info(f"  Status: {'ENABLED' if enabled else 'DISABLED'}")
         logger.info(f"  Cost: $0 (no LLM calls)")
         logger.info("=" * 60)
+
+    def check_trailing_stop(self, symbol: str, pnl_pct: float) -> Tuple[bool, str]:
+        """
+        HIB-002: Check trailing stop logic for winning trades.
+
+        Logic:
+        - At +4% P&L: Move stop to breakeven (0%)
+        - At +6% P&L: Start trailing stop at (peak_pnl - 2%)
+
+        Args:
+            symbol: Position symbol
+            pnl_pct: Current P&L percentage
+
+        Returns:
+            Tuple of (should_close: bool, reason: str)
+        """
+        # Initialize tracking if not exists
+        if symbol not in self.trailing_stops:
+            self.trailing_stops[symbol] = {
+                'breakeven_activated': False,
+                'trailing_stop_pct': None,
+                'peak_pnl_pct': 0.0
+            }
+
+        tracking = self.trailing_stops[symbol]
+
+        # Update peak P&L
+        if pnl_pct > tracking['peak_pnl_pct']:
+            old_peak = tracking['peak_pnl_pct']
+            tracking['peak_pnl_pct'] = pnl_pct
+
+            # Check if we crossed trailing trigger threshold
+            if pnl_pct >= self.TRAILING_TRIGGER_PCT:
+                new_trailing_stop = pnl_pct - self.TRAILING_DISTANCE_PCT
+                old_trailing = tracking['trailing_stop_pct']
+
+                # Only update if new stop is higher
+                if tracking['trailing_stop_pct'] is None or new_trailing_stop > tracking['trailing_stop_pct']:
+                    tracking['trailing_stop_pct'] = new_trailing_stop
+                    logger.info(f"   📈 [TRAILING] {symbol}: Peak {pnl_pct:+.2f}%, trailing stop raised to {new_trailing_stop:+.2f}%")
+
+        # Check if breakeven activated (first time crossing +4%)
+        if pnl_pct >= self.BREAKEVEN_TRIGGER_PCT and not tracking['breakeven_activated']:
+            tracking['breakeven_activated'] = True
+            logger.info(f"   🔒 [TRAILING] {symbol}: Breakeven lock activated at {pnl_pct:+.2f}%")
+
+        # Check for trailing stop hit
+        if tracking['trailing_stop_pct'] is not None:
+            if pnl_pct <= tracking['trailing_stop_pct']:
+                return True, f"TRAILING_STOP hit (stop={tracking['trailing_stop_pct']:+.2f}%, current={pnl_pct:+.2f}%)"
+
+        # Check for breakeven stop (only after activation and if price drops to 0%)
+        if tracking['breakeven_activated']:
+            if pnl_pct <= 0:
+                return True, f"BREAKEVEN_STOP hit (P&L dropped to {pnl_pct:+.2f}% after reaching +{self.BREAKEVEN_TRIGGER_PCT}%)"
+
+        return False, ""
+
+    def clear_trailing_stop(self, symbol: str):
+        """Clear trailing stop tracking for a closed position."""
+        if symbol in self.trailing_stops:
+            del self.trailing_stops[symbol]
+            logger.debug(f"[TRAILING] Cleared tracking for {symbol}")
 
     async def check_positions_once(self) -> List[Dict]:
         """
@@ -137,12 +209,19 @@ class FastExitMonitor:
                     'pnl_pct': pnl_pct / 100  # Convert to decimal for rules
                 }
 
-                # Check exit rules (TP/SL/trailing/time)
-                should_close, reason = self.exit_rules.check_should_force_close(
-                    position_for_rules,
-                    {},  # No market data needed for basic TP/SL
-                    tracker_data
-                )
+                # HIB-002: Check trailing stop FIRST (takes priority)
+                trailing_close, trailing_reason = self.check_trailing_stop(symbol, pnl_pct)
+
+                if trailing_close:
+                    should_close = True
+                    reason = trailing_reason
+                else:
+                    # Check regular exit rules (TP/SL/time)
+                    should_close, reason = self.exit_rules.check_should_force_close(
+                        position_for_rules,
+                        {},  # No market data needed for basic TP/SL
+                        tracker_data
+                    )
 
                 if should_close:
                     logger.info(f"⚡ [FAST-EXIT] {symbol} triggered: {reason}")
@@ -190,6 +269,9 @@ class FastExitMonitor:
 
                         # Unregister from exit rules tracking
                         self.exit_rules.unregister_position(symbol)
+
+                        # HIB-002: Clear trailing stop tracking for closed position
+                        self.clear_trailing_stop(symbol)
                     else:
                         logger.error(f"   ❌ Fast exit failed: {result.get('error')}")
                 else:
