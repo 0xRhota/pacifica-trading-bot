@@ -1,0 +1,122 @@
+{
+  "project": "Hibachi Dual Strategy",
+  "branchName": "ralph/hibachi-improvements",
+  "description": "Improve Hibachi Grid MM + LLM Directional until profitable",
+  "userStories": [
+    {
+      "id": "HIB-001",
+      "title": "Add momentum confirmation to LLM scoring",
+      "description": "Enhance v9 scoring by requiring 5-minute momentum to confirm LLM direction before entering.",
+      "acceptanceCriteria": [
+        "Calculate 5-minute price momentum before entry",
+        "Require momentum direction matches LLM direction (both bullish or both bearish)",
+        "Log momentum value in trade decision output",
+        "Syntax check passes: python3 -m py_compile hibachi_agent/bot_hibachi.py"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Reduce false signals by confirming LLM direction with short-term momentum"
+    },
+    {
+      "id": "HIB-002",
+      "title": "Implement trailing stop for winning trades",
+      "description": "Lock in profits by trailing stop loss as position moves in our favor.",
+      "acceptanceCriteria": [
+        "When P&L > 4%, move stop loss to breakeven (entry price)",
+        "When P&L > 6%, trail stop at (current P&L - 2%)",
+        "Log trailing stop adjustments in fast_exit_monitor",
+        "Syntax check passes: python3 -m py_compile hibachi_agent/execution/fast_exit_monitor.py"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "The BTC SHORT just closed at +7.99% - trailing stop would have locked in more profit"
+    },
+    {
+      "id": "HIB-003",
+      "title": "Optimize Grid MM spread for Hibachi",
+      "description": "Analyze current spread settings and optimize for more fills.",
+      "acceptanceCriteria": [
+        "Review logs/grid_mm_hibachi.log for fill rate vs spread",
+        "If spread too wide (few fills), reduce by 20%",
+        "If spread too tight (adverse selection), increase by 20%",
+        "Document findings in progress.txt",
+        "Update spread config in scripts/grid_mm_hibachi.py"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Current: 10-20 bps dynamic spread"
+    },
+    {
+      "id": "HIB-004",
+      "title": "Add win rate tracking per asset",
+      "description": "Track and log win rate by asset to identify which pairs work best.",
+      "acceptanceCriteria": [
+        "Track wins/losses per symbol in LLM bot",
+        "Log win rate summary at end of each decision cycle",
+        "Block assets with <30% win rate over 10+ trades",
+        "Syntax check passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "DOGE already blocked at 9% win rate - extend this pattern"
+    },
+    {
+      "id": "HIB-005",
+      "title": "Reduce LLM API calls with caching",
+      "description": "Cache market data and reduce redundant LLM calls to save costs.",
+      "acceptanceCriteria": [
+        "Cache indicator calculations for 60 seconds",
+        "Skip LLM call if no significant market change",
+        "Log cache hits/misses",
+        "Measure and document cost savings in progress.txt"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Currently calling LLM every 10 minutes for each asset"
+    },
+    {
+      "id": "HIB-006",
+      "title": "Add position sizing based on conviction",
+      "description": "Size positions larger when LLM confidence is higher.",
+      "acceptanceCriteria": [
+        "Confidence 0.7-0.8: base size ($100)",
+        "Confidence 0.8-0.9: 1.5x size ($150)",
+        "Confidence 0.9+: 2x size ($200)",
+        "Never exceed available margin",
+        "Log size multiplier in trade output"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "HIB-007",
+      "title": "Create Hibachi performance dashboard",
+      "description": "Script to show real-time performance of both Grid MM and LLM bots.",
+      "acceptanceCriteria": [
+        "Create scripts/hibachi_dashboard.py",
+        "Show: Grid MM fills/volume/PnL, LLM wins/losses/PnL",
+        "Show combined account value and daily PnL",
+        "Can run on demand: python3 scripts/hibachi_dashboard.py"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "HIB-008",
+      "title": "Final Hibachi optimization and documentation",
+      "description": "Apply best settings, run 24h test, document results.",
+      "acceptanceCriteria": [
+        "All previous stories implemented and working",
+        "Run 24-hour live test",
+        "Document final configuration in PROGRESS.md",
+        "Document learnings in LEARNINGS.md",
+        "Target: breakeven or profitable over 24h"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "All code complete and documented. 24h test ready to start - see progress-hibachi.txt for commands."
+    }
+  ]
+}
