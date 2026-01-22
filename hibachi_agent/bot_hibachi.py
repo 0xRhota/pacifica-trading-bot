@@ -39,6 +39,8 @@ from utils.cambrian_risk_engine import CambrianRiskEngine
 from llm_agent.data.sentiment_fetcher import SentimentFetcher
 from llm_agent.shared_learning import SharedLearning
 from llm_agent.self_learning import SelfLearning
+from llm_agent.adaptive import AdaptiveManager
+import pandas as pd
 
 # Load environment variables from project root
 project_root_env = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
@@ -195,6 +197,15 @@ class HibachiTradingBot:
         self.self_learning_interval = 1800  # 30 minutes
         logger.info("📚 Self-Learning initialized (30-min check-ins + working memory)")
 
+        # Initialize Adaptive Trading System (2026-01-10)
+        # Components: Regime Detection + Confidence Calibration + Circuit Breaker
+        self.adaptive_manager = AdaptiveManager(
+            symbol="global",  # Global calibration, per-symbol regime detection
+            base_stop_loss_pct=2.0,
+            base_position_size=position_size
+        )
+        logger.info("🔄 Adaptive System initialized (regime + calibration + circuit breaker)")
+
         # Initialize strategies
         self.strategy = strategy
         self.strategy_f = None
@@ -280,6 +291,97 @@ class HibachiTradingBot:
         # Log prompt version
         prompt_version = self.llm_agent.prompt_formatter.get_prompt_version()
         logger.info(f"📝 Active Prompt Version: {prompt_version}")
+
+    def calculate_momentum(self, kline_df: pd.DataFrame, lookback_minutes: int = 5) -> Optional[Dict]:
+        """
+        Calculate short-term price momentum for entry confirmation.
+
+        HIB-001: Momentum confirmation to reduce false signals.
+
+        Args:
+            kline_df: DataFrame with OHLCV data
+            lookback_minutes: Lookback period in minutes (default: 5)
+
+        Returns:
+            Dict with momentum data or None if insufficient data
+        """
+        if kline_df is None or kline_df.empty:
+            return None
+
+        try:
+            # Need at least 2 candles for momentum
+            if len(kline_df) < 2:
+                return None
+
+            # Get recent prices (last N candles based on interval)
+            # Assuming 5m candles, 1 candle = 5 minutes
+            # For 5-minute momentum, we need 1 candle lookback
+            candles_needed = max(1, lookback_minutes // 5)
+
+            # Get current and lookback prices
+            current_price = float(kline_df['close'].iloc[-1])
+            lookback_price = float(kline_df['close'].iloc[-candles_needed - 1]) if len(kline_df) > candles_needed else float(kline_df['close'].iloc[0])
+
+            # Calculate momentum percentage
+            momentum_pct = ((current_price - lookback_price) / lookback_price) * 100
+
+            # Determine direction
+            if momentum_pct > 0.05:  # > 0.05% is bullish
+                direction = "BULLISH"
+            elif momentum_pct < -0.05:  # < -0.05% is bearish
+                direction = "BEARISH"
+            else:
+                direction = "NEUTRAL"
+
+            return {
+                'momentum_pct': momentum_pct,
+                'direction': direction,
+                'current_price': current_price,
+                'lookback_price': lookback_price,
+                'lookback_minutes': lookback_minutes
+            }
+        except Exception as e:
+            logger.warning(f"Error calculating momentum: {e}")
+            return None
+
+    def check_momentum_confirmation(self, momentum_data: Optional[Dict], llm_action: str) -> tuple[bool, str]:
+        """
+        Check if 5-minute momentum confirms LLM direction.
+
+        HIB-001: Require momentum direction matches LLM direction.
+
+        Args:
+            momentum_data: Dict from calculate_momentum()
+            llm_action: LLM decision action (LONG/SHORT/BUY/SELL)
+
+        Returns:
+            Tuple of (is_confirmed: bool, reason: str)
+        """
+        if momentum_data is None:
+            # No momentum data - allow trade with warning
+            return True, "No momentum data available - proceeding"
+
+        momentum_dir = momentum_data['direction']
+        momentum_pct = momentum_data['momentum_pct']
+
+        # Normalize LLM action to direction
+        llm_is_bullish = llm_action.upper() in ["LONG", "BUY"]
+
+        # Check alignment
+        if llm_is_bullish:
+            if momentum_dir == "BEARISH":
+                return False, f"Momentum BEARISH ({momentum_pct:+.2f}%) conflicts with LONG signal"
+            elif momentum_dir == "NEUTRAL":
+                return True, f"Momentum NEUTRAL ({momentum_pct:+.2f}%) - weak LONG confirmation"
+            else:  # BULLISH
+                return True, f"Momentum BULLISH ({momentum_pct:+.2f}%) confirms LONG signal"
+        else:  # SHORT/SELL
+            if momentum_dir == "BULLISH":
+                return False, f"Momentum BULLISH ({momentum_pct:+.2f}%) conflicts with SHORT signal"
+            elif momentum_dir == "NEUTRAL":
+                return True, f"Momentum NEUTRAL ({momentum_pct:+.2f}%) - weak SHORT confirmation"
+            else:  # BEARISH
+                return True, f"Momentum BEARISH ({momentum_pct:+.2f}%) confirms SHORT signal"
 
     async def run_self_learning(self):
         """Run self-learning check-in - analyze performance and log insights"""
@@ -422,10 +524,27 @@ class HibachiTradingBot:
                     })
 
             # Check hard exit rules BEFORE LLM decision (force closes override LLM)
+            # EXCEPT for Strategy D (pairs trade) - pairs should close together, not individually
             logger.info("🛡️  Checking hard exit rules...")
             forced_closes = []
+
+            # Get pairs trade symbols if Strategy D is active
+            pairs_trade_symbols = set()
+            if self.strategy.upper() == "D" and self.pairs_strategy:
+                pairs_trade_symbols = {self.pairs_strategy.ASSET_A, self.pairs_strategy.ASSET_B}
+                if self.pairs_strategy.active_trade:
+                    # Also add the dynamically selected long/short assets
+                    pairs_trade_symbols.add(self.pairs_strategy.active_trade.get("long_asset", ""))
+                    pairs_trade_symbols.add(self.pairs_strategy.active_trade.get("short_asset", ""))
+                logger.info(f"   [PAIRS] Skipping hard exit rules for pairs positions: {pairs_trade_symbols}")
+
             for position in open_positions[:]:  # Use slice copy to allow modification during iteration
                 symbol = position.get('symbol', 'UNKNOWN')
+
+                # Skip hard exit rules for pairs trade positions - they close together via Strategy D
+                if symbol in pairs_trade_symbols:
+                    logger.debug(f"   [PAIRS] Skipping hard exit check for {symbol} (pairs trade position)")
+                    continue
                 side = position.get('side', 'UNKNOWN')
                 pnl = position.get('pnl', 0)
                 entry_price = position.get('entry_price', 0)
@@ -490,6 +609,15 @@ class HibachiTradingBot:
 
                     if close_result.get('success'):
                         logger.info(f"      ✅ Forced close executed successfully")
+
+                        # ADAPTIVE SYSTEM: Record trade result for circuit breaker + calibration
+                        pnl_for_adaptive = close_result.get('pnl', 0)
+                        entry_conf = tracker_data.get('confidence', 0.5) if tracker_data else 0.5
+                        self.adaptive_manager.record_trade_result(
+                            symbol=symbol,
+                            pnl=pnl_for_adaptive,
+                            raw_confidence=entry_conf
+                        )
 
                         # STRATEGY F: Record trade exit for learning
                         if self.strategy_f:
@@ -740,11 +868,35 @@ class HibachiTradingBot:
             except Exception as e:
                 logger.warning(f"[SELF-LEARN] Could not generate learning context: {e}")
 
+            # ═══════════════════════════════════════════════════════════════
+            # ADAPTIVE SYSTEM - Regime + Calibration + Circuit Breaker (2026-01-10)
+            # ═══════════════════════════════════════════════════════════════
+            adaptive_context = ""
+            circuit_breaker_active = False
+            try:
+                # Get first symbol's market data for global regime detection
+                first_symbol = list(market_data_dict.keys())[0] if market_data_dict else None
+                if first_symbol:
+                    sample_market_data = market_data_dict[first_symbol]
+                    adaptive_context = self.adaptive_manager.get_prompt_context(sample_market_data)
+
+                    # Check circuit breaker
+                    is_triggered, trigger_reason = self.adaptive_manager.circuit_breaker.is_triggered()
+                    if is_triggered:
+                        circuit_breaker_active = True
+                        logger.warning(f"[ADAPTIVE] Circuit breaker ACTIVE: {trigger_reason}")
+                    else:
+                        logger.info(f"[ADAPTIVE] Regime: {self.adaptive_manager.regime_detector.current_regime.value}")
+            except Exception as e:
+                logger.warning(f"[ADAPTIVE] Could not generate context: {e}")
+
             # Build kwargs based on prompt version
             # Combine all learning contexts
             learning_context = ""
             if self_learning_context:
                 learning_context += f"\n\n=== SELF-LEARNING INSIGHTS ===\n{self_learning_context}"
+            if adaptive_context:
+                learning_context += adaptive_context
 
             prompt_kwargs = {
                 "market_table": market_table,
@@ -983,6 +1135,7 @@ class HibachiTradingBot:
             for i, decision in enumerate(decisions, 1):
                 action = decision.get('action')
                 symbol = decision.get('symbol', 'N/A')
+                raw_confidence = decision.get('confidence', 0.5)
 
                 # Map BUY/SELL to LONG/SHORT for executor
                 if action == "BUY":
@@ -994,6 +1147,61 @@ class HibachiTradingBot:
 
                 logger.info(f"\n[{i}/{len(decisions)}] {action} {symbol}")
                 logger.info(f"   Reasoning: {decision.get('reasoning', 'N/A')}")
+
+                # ═══════════════════════════════════════════════════════════════
+                # ADAPTIVE SYSTEM: Pre-trade checks (2026-01-10)
+                # ═══════════════════════════════════════════════════════════════
+                if action in ["LONG", "SHORT"]:
+                    symbol_market_data = market_data_dict.get(symbol, {})
+                    should_trade, veto_reason, size_mult = self.adaptive_manager.should_trade(
+                        raw_confidence=raw_confidence,
+                        market_data=symbol_market_data
+                    )
+
+                    if not should_trade:
+                        logger.warning(f"  ⛔ ADAPTIVE VETO: {veto_reason}")
+                        continue
+
+                    # Calibrate confidence and adjust sizing
+                    calibrated_conf = self.adaptive_manager.calibrate_confidence(raw_confidence)
+                    logger.info(f"   Confidence: {raw_confidence:.2f} -> {calibrated_conf:.2f} (calibrated)")
+
+                    # Get regime-adjusted trade parameters
+                    trade_params = self.adaptive_manager.get_trade_parameters(
+                        symbol=symbol,
+                        market_data=symbol_market_data,
+                        raw_confidence=raw_confidence
+                    )
+
+                    # Apply adaptive sizing
+                    if 'position_size_usd' not in decision:
+                        decision['position_size_usd'] = trade_params['position_size_usd']
+                    else:
+                        decision['position_size_usd'] *= size_mult
+
+                    logger.info(f"   Regime: {trade_params['regime']} | "
+                               f"Stop: {trade_params['stop_loss_pct']:.1f}% | "
+                               f"Size: ${decision['position_size_usd']:.2f}")
+
+                # ═══════════════════════════════════════════════════════════════
+                # HIB-001: MOMENTUM CONFIRMATION (2026-01-22)
+                # Require 5-minute momentum to match LLM direction before entry
+                # ═══════════════════════════════════════════════════════════════
+                if action in ["LONG", "SHORT"]:
+                    symbol_market_data = market_data_dict.get(symbol, {})
+                    kline_df = symbol_market_data.get('kline_df')
+                    momentum_data = self.calculate_momentum(kline_df, lookback_minutes=5)
+
+                    if momentum_data:
+                        logger.info(f"   📈 5-min Momentum: {momentum_data['momentum_pct']:+.3f}% ({momentum_data['direction']})")
+
+                    is_confirmed, momentum_reason = self.check_momentum_confirmation(momentum_data, action)
+
+                    if not is_confirmed:
+                        logger.warning(f"  ⛔ MOMENTUM VETO: {momentum_reason}")
+                        continue  # Skip this decision
+                    else:
+                        logger.info(f"   ✅ {momentum_reason}")
 
                 # TREND FILTER (2025-12-02): Block shorts in bullish trends
                 if action == "SHORT":
