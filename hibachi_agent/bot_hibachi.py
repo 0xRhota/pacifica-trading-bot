@@ -952,6 +952,28 @@ class HibachiTradingBot:
 
             prompt = self.llm_agent.prompt_formatter.format_trading_prompt(**prompt_kwargs)
 
+            # ═══════════════════════════════════════════════════════════════
+            # HIB-005: Check if market has significant change before LLM call
+            # Skip LLM if no positions and no significant market movement
+            # ═══════════════════════════════════════════════════════════════
+            has_change, changed_symbols = self.aggregator.has_significant_change(market_data_dict)
+
+            # Log cache stats periodically
+            cache_stats = self.aggregator.get_cache_stats()
+            if cache_stats['hits'] + cache_stats['misses'] > 0:
+                logger.info(f"📦 Cache: {cache_stats['hit_rate']:.0%} hit rate "
+                           f"({cache_stats['hits']} hits, {cache_stats['misses']} misses)")
+
+            # Skip LLM call if no significant change AND no open positions
+            # (Always call LLM if we have positions - need to monitor exits)
+            if not has_change and len(open_positions) == 0:
+                logger.info("💤 No significant market change detected - skipping LLM call")
+                logger.info(f"   (saves ~$0.01 per skipped call)")
+                return
+
+            if changed_symbols:
+                logger.info(f"📊 Significant changes in: {', '.join(changed_symbols)}")
+
             # Get trading decision from LLM (same pattern as Lighter bot)
             logger.info("🤖 Getting trading decision from LLM...")
 
