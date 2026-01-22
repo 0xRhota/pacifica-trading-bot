@@ -129,6 +129,11 @@ class GridMarketMakerLive:
         self.initial_balance = 0.0
         self.current_balance = 0.0
 
+        # NP-004: Fill rate monitoring
+        self.last_fill_time = None
+        self.no_fill_alert_threshold_seconds = 1800  # Alert if 0 fills for 30 minutes
+        self.no_fill_alert_triggered = False
+
         # Position tracking
         self.position_size = 0.0
         self.position_notional = 0.0
@@ -666,6 +671,34 @@ class GridMarketMakerLive:
         if orders_placed > 0:
             logger.info(f"  Grid: {orders_placed} orders placed around ${mid_price:,.2f} (spread: {self.current_spread_bps:.1f}bps)")
 
+    def _check_fill_rate_alert(self):
+        """
+        NP-004: Check fill rate and alert if 0 fills for >30 minutes.
+        """
+        if self.last_fill_time is None:
+            # No fills yet - check since start
+            if self.start_time:
+                time_since_start = (datetime.now() - self.start_time).total_seconds()
+                if time_since_start >= self.no_fill_alert_threshold_seconds and not self.no_fill_alert_triggered:
+                    logger.warning(f"  ⚠️ NO FILLS ALERT: 0 fills in {time_since_start/60:.0f} minutes since start!")
+                    self.no_fill_alert_triggered = True
+        else:
+            time_since_fill = (datetime.now() - self.last_fill_time).total_seconds()
+            if time_since_fill >= self.no_fill_alert_threshold_seconds and not self.no_fill_alert_triggered:
+                logger.warning(f"  ⚠️ NO FILLS ALERT: 0 fills in {time_since_fill/60:.0f} minutes!")
+                self.no_fill_alert_triggered = True
+
+    def _get_fill_rate_per_hour(self) -> float:
+        """
+        NP-004: Calculate fills per hour based on runtime.
+        """
+        if not self.start_time:
+            return 0.0
+        elapsed_hours = (datetime.now() - self.start_time).total_seconds() / 3600
+        if elapsed_hours < 0.01:  # Less than 36 seconds
+            return 0.0
+        return self.fills_count / elapsed_hours
+
     def _check_fills(self) -> int:
         """Check for filled orders and update stats. Also sync open_orders with exchange."""
         fills = 0
@@ -692,6 +725,10 @@ class GridMarketMakerLive:
                         self.total_volume += notional
                         self.fills_count += 1
                         fills += 1
+
+                        # NP-004: Track last fill time
+                        self.last_fill_time = datetime.now()
+                        self.no_fill_alert_triggered = False
 
                         logger.info(f"  FILL: {info['side']} {filled_size:.6f} @ ${fill_price:,.2f} (${notional:,.2f})")
                         del self.open_orders[order_id]
@@ -810,6 +847,9 @@ class GridMarketMakerLive:
                 if time_since_learning >= self.self_learning_interval:
                     self._run_self_learning_check()
 
+                # NP-004: Check fill rate alert
+                self._check_fill_rate_alert()
+
                 # Status log every 30 seconds
                 if cycle % 30 == 0:
                     # Update balance
@@ -824,9 +864,12 @@ class GridMarketMakerLive:
                     inv_pct = abs(self.position_notional) / self.capital * 100 if self.capital > 0 else 0
                     pause_status = f"PAUSE-{self.pause_side}" if self.orders_paused else "LIVE"
 
+                    # NP-004: Calculate fill rate
+                    fill_rate = self._get_fill_rate_per_hour()
+
                     logger.info(f"\n[{elapsed:.1f}m] ${mid:,.2f} | Mkt: {spread_bps:.1f}bps | Bot: {self.current_spread_bps:.1f}bps | ROC: {roc:+.1f}bps | {pause_status}")
                     logger.info(f"  Position: {self.position_size:.6f} BTC ({inv_pct:.0f}% inv)")
-                    logger.info(f"  Volume: ${self.total_volume:,.2f} | Fills: {self.fills_count}")
+                    logger.info(f"  Volume: ${self.total_volume:,.2f} | Fills: {self.fills_count} ({fill_rate:.1f}/hr)")
                     logger.info(f"  P&L: ${pnl:+.2f} (${self.current_balance:.2f})")
 
                     if self.total_volume > 0:
