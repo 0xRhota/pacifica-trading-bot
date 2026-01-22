@@ -1,12 +1,25 @@
 #!/usr/bin/env python3.11
 """
-Grid Market Maker v15 - LIVE on Paradex
-Dynamic spread based on ROC volatility + time-based refresh
+Grid Market Maker v17 - LIVE on Paradex
+Dynamic spread based on ROC volatility + time-based refresh + stale order detection + tight spread mode
 
 Strategy: Place limit orders on both sides of mid price
 - Earns spread + maker rebates (-0.005%)
 - DYNAMIC SPREAD: Automatically adjusts based on volatility
 - TIME-BASED REFRESH: Refresh orders every 5 minutes (US-002)
+- STALE ORDER DETECTION: Refresh if orders drift >0.2% from mid (US-003)
+- TIGHT SPREAD MODE: Reduce spread by 20% after 2 min of calm market (NP-002)
+
+v17 Changes (Tight spread mode - NP-002):
+- Track consecutive low-ROC cycles (ROC < 2bps)
+- After 2 minutes of low ROC, reduce spread by 20%
+- Log shows 'TIGHT_SPREAD mode: spread reduced to Xbps'
+- Revert to normal spread when ROC increases above 5bps
+
+v16 Changes (Stale order detection - US-003):
+- Added _check_stale_orders() method to detect orders >0.2% from mid
+- Triggers immediate refresh when stale orders detected
+- Log shows 'Stale order refresh: order at $X is Y% from mid'
 
 v15 Changes (Time-based refresh - US-002):
 - Added last_refresh_time tracking
@@ -55,8 +68,8 @@ from llm_agent.self_learning import SelfLearning
 
 class GridMarketMakerLive:
     """
-    Live Grid Market Maker v15 for Paradex
-    Dynamic spread based on ROC volatility + time-based refresh (US-002)
+    Live Grid Market Maker v16 for Paradex
+    Dynamic spread based on ROC volatility + time-based refresh (US-002) + stale order detection (US-003)
     """
 
     def __init__(
@@ -99,6 +112,14 @@ class GridMarketMakerLive:
         # v15: Time-based refresh (US-002)
         self.last_refresh_time = None
         self.time_refresh_interval = 300  # 5 minutes
+
+        # v17: Tight spread mode (NP-002)
+        self.tight_spread_mode = False
+        self.low_roc_start_time = None
+        self.tight_spread_threshold_bps = 2.0  # ROC < 2 bps = calm market
+        self.tight_spread_exit_threshold_bps = 5.0  # ROC > 5 bps = exit tight mode
+        self.tight_spread_activation_seconds = 120  # 2 minutes of calm
+        self.tight_spread_reduction_pct = 0.20  # Reduce spread by 20%
 
         # Stats
         self.total_volume = 0.0
@@ -311,6 +332,8 @@ class GridMarketMakerLive:
         Returns spread in bps. Lower ROC = tighter spread (more fills).
         Higher ROC = wider spread (protect from adverse selection).
 
+        v17 (NP-002): Apply tight spread reduction when in calm market mode
+
         Spread bands:
         | ROC (abs) | Spread | Rationale |
         |-----------|--------|-----------|
@@ -334,7 +357,68 @@ class GridMarketMakerLive:
             # Above 50 bps is handled by pause logic, but return wide spread as fallback
             spread = 15.0
 
+        # NP-002: Apply tight spread reduction in calm markets
+        if self.tight_spread_mode and abs_roc < self.tight_spread_exit_threshold_bps:
+            original_spread = spread
+            spread = spread * (1 - self.tight_spread_reduction_pct)
+            logger.info(f"  📉 TIGHT_SPREAD mode: spread reduced to {spread:.1f}bps (from {original_spread:.1f}bps)")
+
         return spread
+
+    def _update_tight_spread_mode(self, roc: float):
+        """
+        NP-002: Update tight spread mode based on low-ROC periods.
+
+        - Track consecutive low-ROC cycles (ROC < 2bps)
+        - After 2 minutes of low ROC, activate tight spread mode
+        - Revert to normal spread when ROC increases above 5bps
+        """
+        abs_roc = abs(roc)
+
+        if abs_roc < self.tight_spread_threshold_bps:
+            # Low volatility - track duration
+            if self.low_roc_start_time is None:
+                self.low_roc_start_time = datetime.now()
+
+            elapsed = (datetime.now() - self.low_roc_start_time).total_seconds()
+            if elapsed >= self.tight_spread_activation_seconds and not self.tight_spread_mode:
+                self.tight_spread_mode = True
+                logger.info(f"  📉 TIGHT_SPREAD mode: activated after {elapsed:.0f}s of calm (ROC: {roc:+.1f}bps)")
+        elif abs_roc > self.tight_spread_exit_threshold_bps:
+            # Volatility returned - exit tight mode
+            if self.tight_spread_mode:
+                logger.info(f"  📈 TIGHT_SPREAD mode: deactivated (ROC: {roc:+.1f}bps > {self.tight_spread_exit_threshold_bps}bps)")
+            self.tight_spread_mode = False
+            self.low_roc_start_time = None
+
+    def _check_stale_orders(self, mid_price: float) -> Optional[tuple]:
+        """
+        Check if any tracked orders are stale (>0.2% from mid price).
+
+        US-003: Stale order detection
+        - Calculate distance of tracked orders from current mid price
+        - If any order is >0.2% from mid, return (order_price, distance_pct)
+        - Returns None if no stale orders
+
+        Returns:
+            Optional[tuple]: (stale_order_price, distance_pct) if stale order found, else None
+        """
+        if not self.open_orders or not mid_price:
+            return None
+
+        stale_threshold_pct = 0.2  # 0.2% = 20 bps
+
+        for order_id, order_info in self.open_orders.items():
+            order_price = order_info.get('price', 0)
+            if order_price <= 0:
+                continue
+
+            distance_pct = abs(order_price - mid_price) / mid_price * 100
+
+            if distance_pct > stale_threshold_pct:
+                return (order_price, distance_pct)
+
+        return None
 
     def _update_pause_state(self, roc: float):
         """
@@ -665,6 +749,9 @@ class GridMarketMakerLive:
                 roc = self._calculate_roc()
                 self._update_pause_state(roc)
 
+                # v17: Update tight spread mode based on low-ROC periods (NP-002)
+                self._update_tight_spread_mode(roc)
+
                 # Check for fills
                 fills = self._check_fills()
 
@@ -688,16 +775,25 @@ class GridMarketMakerLive:
                 time_since_refresh = (datetime.now() - self.last_refresh_time).total_seconds() if self.last_refresh_time else 0
                 time_based_refresh = time_since_refresh >= self.time_refresh_interval
 
+                # v16: Check for stale orders (US-003)
+                # If any tracked order is >0.2% from mid price, trigger immediate refresh
+                stale_order_info = self._check_stale_orders(mid)
+                stale_order_refresh = stale_order_info is not None
+
                 should_refresh = (
                     fills > 0 or
                     price_move_pct >= grid_reset_pct or  # 0.5% price move (v10 behavior)
                     inventory_ratio > 0.8 or  # Inventory force reset at 80%
                     (no_tracked_orders and not_fully_paused) or  # Re-place if orders disappeared
-                    time_based_refresh  # v15: Refresh every 5 minutes regardless of price/fills
+                    time_based_refresh or  # v15: Refresh every 5 minutes regardless of price/fills
+                    stale_order_refresh  # v16: Refresh if orders are stale
                 )
 
                 if should_refresh:
-                    if price_move_pct >= grid_reset_pct:
+                    if stale_order_refresh:
+                        stale_price, stale_dist = stale_order_info
+                        logger.info(f"  Stale order refresh: order at ${stale_price:,.2f} is {stale_dist:.2f}% from mid")
+                    elif price_move_pct >= grid_reset_pct:
                         logger.info(f"  Grid reset: price moved {price_move_pct:.3f}%")
                     elif inventory_ratio > 0.8:
                         logger.info(f"  Grid reset: inventory at {inventory_ratio*100:.0f}%")
@@ -764,7 +860,7 @@ class GridMarketMakerLive:
         pnl = self.current_balance - self.initial_balance
 
         logger.info("\n" + "=" * 70)
-        logger.info("GRID MM v15 LIVE - FINAL REPORT")
+        logger.info("GRID MM v17 LIVE - FINAL REPORT")
         logger.info("=" * 70)
         logger.info(f"Duration: {elapsed:.1f} minutes")
         logger.info(f"Total Volume: ${self.total_volume:,.2f}")
