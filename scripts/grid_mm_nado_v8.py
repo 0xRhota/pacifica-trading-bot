@@ -1,41 +1,32 @@
 #!/usr/bin/env python3
 """
-Grid Market Maker v17 - Nado DEX
-Dynamic spread based on ROC volatility + time-based refresh + stale order detection + tight spread mode
+Grid Market Maker v18 - Nado DEX
+Qwen-calibrated dynamic spread based on ROC volatility
 
 Strategy: Place limit orders on both sides of mid price
 - Grid resets on 0.5% price move
 - Inventory skew at 70% threshold
 - ROC-based trend pause with longer pauses
-- DYNAMIC SPREAD: Automatically adjusts based on volatility
+- DYNAMIC SPREAD: Automatically adjusts based on volatility (Qwen-calibrated)
 - TIME-BASED REFRESH: Refresh orders every 5 minutes (US-001)
 - STALE ORDER DETECTION: Refresh if orders drift >0.2% from mid (US-003)
-- TIGHT SPREAD MODE: Reduce spread by 20% after 2 min of calm market (NP-002)
 
-v17 Changes (Tight spread mode - NP-002):
-- Track consecutive low-ROC cycles (ROC < 2bps)
-- After 2 minutes of low ROC, reduce spread by 20%
-- Log shows 'TIGHT_SPREAD mode: spread reduced to Xbps'
-- Revert to normal spread when ROC increases above 5bps
+v18 Changes (Qwen-calibrated spreads):
+- Removed tight_spread_mode (redundant with proper dynamic bands)
+- New spread bands calibrated between v12 (too tight) and v13 (too wide):
+  - v12 used 1.5 bps calm → adverse selection losses (-8.5 bps avg, -$23.57/7d)
+  - v13 used 15 bps calm → zero fills in 5+ hours
+  - v18 uses 4 bps calm → middle ground per Qwen recommendation
+- 6 tiers: 4/6/8/12/15/PAUSE bps
 
-v16 Changes (Stale order detection - US-003):
-- Added _check_stale_orders() method to detect orders >0.2% from mid
-- Triggers immediate refresh when stale orders detected
-- Log shows 'Stale order refresh: order at $X is Y% from mid'
-
-v15 Changes (Time-based refresh - US-001):
-- Added last_refresh_time tracking
-- Refresh orders if >5 minutes since last placement
-- Move _calculate_dynamic_spread() OUTSIDE of _place_grid_orders()
-  so spread updates every status cycle (not just on order placement)
-- Log shows 'Time-based refresh' when triggered
-
-v12 Parameters (Dynamic Spread):
+v18 Parameters (Dynamic Spread - Qwen calibrated):
 - Spread: DYNAMIC based on ROC
-  - ROC 0-5 bps → 15 bps spread (calm market)
-  - ROC 5-10 bps → 20 bps spread (low volatility)
-  - ROC 10-20 bps → 25 bps spread (moderate volatility)
-  - ROC >20 bps → PAUSE orders (trend detected)
+  - ROC 0-5 bps → 4 bps spread (calm market)
+  - ROC 5-10 bps → 6 bps spread (low volatility)
+  - ROC 10-20 bps → 8 bps spread (moderate volatility)
+  - ROC 20-30 bps → 12 bps spread (high volatility)
+  - ROC 30-50 bps → 15 bps spread (very high volatility)
+  - ROC >50 bps → PAUSE orders (trend detected)
 - ROC threshold: 50 bps for pause
 - Pause duration: 5 minutes
 - Grid reset: 0.5% price move OR 5 min time-based refresh
@@ -137,18 +128,12 @@ class GridMarketMakerNado:
         self.last_refresh_time = None
         self.time_refresh_interval = 300  # 5 minutes
 
-        # v17: Tight spread mode (NP-002)
-        self.tight_spread_mode = False
-        self.low_roc_start_time = None
-        self.tight_spread_threshold_bps = 2.0  # ROC < 2 bps = calm market
-        self.tight_spread_exit_threshold_bps = 5.0  # ROC > 5 bps = exit tight mode
-        self.tight_spread_activation_seconds = 120  # 2 minutes of calm
-        self.tight_spread_reduction_pct = 0.20  # Reduce spread by 20%
+        # v18: Tight spread mode removed - dynamic bands handle it directly
 
         # v17: Inventory rebalancing (NP-003)
         self.max_inventory_start_time = None
         self.last_rebalance_time = None
-        self.rebalance_threshold_pct = 95.0  # Trigger at 95% inventory
+        self.rebalance_threshold_pct = 55.0  # Trigger at 55% of max_inventory (~96% of capital with 175% leverage)
         self.rebalance_wait_seconds = 900  # 15 minutes at max inventory
         self.rebalance_cooldown_seconds = 3600  # Once per hour max
         self.rebalance_close_pct = 0.25  # Close 25% of position
@@ -170,14 +155,16 @@ class GridMarketMakerNado:
     async def initialize(self):
         """Initialize Nado SDK"""
         logger.info("=" * 70)
-        logger.info("NADO GRID MM v13 - ANTI-ADVERSE-SELECTION")
+        logger.info("NADO GRID MM v18 - QWEN-CALIBRATED DYNAMIC SPREAD")
         logger.info("=" * 70)
         logger.info(f"Symbol: {self.symbol}")
-        logger.info(f"Spread: DYNAMIC (15-30 bps - wider to beat adverse selection)")
-        logger.info(f"  ROC 0-5 bps → 15 bps spread")
-        logger.info(f"  ROC 5-10 bps → 20 bps spread")
-        logger.info(f"  ROC 10-20 bps → 25 bps spread")
-        logger.info(f"  ROC >20 bps → PAUSE orders (trend detected)")
+        logger.info(f"Spread: DYNAMIC (4-15 bps, Qwen-calibrated)")
+        logger.info(f"  ROC 0-5 bps → 4 bps spread (calm)")
+        logger.info(f"  ROC 5-10 bps → 6 bps spread (low vol)")
+        logger.info(f"  ROC 10-20 bps → 8 bps spread (moderate)")
+        logger.info(f"  ROC 20-30 bps → 12 bps spread (high vol)")
+        logger.info(f"  ROC 30-50 bps → 15 bps spread (very high vol)")
+        logger.info(f"  ROC >50 bps → PAUSE orders (trend detected)")
         logger.info(f"ROC Window: 1 minute (fast reaction)")
         logger.info(f"Order Size: ${self.order_size_usd}")
         logger.info(f"Levels: {self.num_levels} per side")
@@ -381,66 +368,38 @@ class GridMarketMakerNado:
         """
         Calculate dynamic spread based on ROC (volatility).
 
-        v13: WIDER SPREADS to combat adverse selection (-8.5 bps avg loss)
-        Analysis showed we were buying $2.51 higher than selling on average.
-        Minimum spread must exceed adverse selection to be profitable.
+        v18 (Qwen-calibrated): Middle ground between v12 (too tight, adverse selection)
+        and v13 (too wide, zero fills).
+        - v12 used 1.5 bps calm → 500 trades in 7d but -$23.57 (8.5 bps adverse selection)
+        - v13 used 15 bps calm → 0 fills in 5+ hours
 
-        v17 (NP-002): Apply tight spread reduction when in calm market mode
-
-        Spread bands (v13 - wider to beat adverse selection):
+        Spread bands (v18 - Qwen calibrated):
         | ROC (abs) | Spread | Rationale |
         |-----------|--------|-----------|
-        | 0-5 bps   | 15 bps | Calm market - still need edge over adverse selection |
-        | 5-10 bps  | 20 bps | Low volatility, balanced |
-        | 10-20 bps | 25 bps | Moderate volatility, protect |
-        | > 20 bps  | PAUSE  | Stop trading, trend detected |
+        | 0-5 bps   | 4 bps  | Calm - tight enough for fills, 2.5x wider than v12 |
+        | 5-10 bps  | 6 bps  | Low volatility, balanced |
+        | 10-20 bps | 8 bps  | Moderate volatility, protect |
+        | 20-30 bps | 12 bps | High volatility, wide protection |
+        | 30-50 bps | 15 bps | Very high vol, minimal exposure |
+        | > 50 bps  | PAUSE  | Stop trading, trend detected |
         """
         abs_roc = abs(roc)
 
         if abs_roc < 5:
-            spread = 15.0  # Was 1.5 - way too tight
+            spread = 4.0
         elif abs_roc < 10:
-            spread = 20.0  # Was 3.0
+            spread = 6.0
         elif abs_roc < 20:
-            spread = 25.0  # Was 6.0
+            spread = 8.0
+        elif abs_roc < 30:
+            spread = 12.0
+        elif abs_roc < 50:
+            spread = 15.0
         else:
-            # Above 20 bps = trend, pause orders
-            spread = 30.0
-
-        # NP-002: Apply tight spread reduction in calm markets
-        if self.tight_spread_mode and abs_roc < self.tight_spread_exit_threshold_bps:
-            original_spread = spread
-            spread = spread * (1 - self.tight_spread_reduction_pct)
-            logger.info(f"  📉 TIGHT_SPREAD mode: spread reduced to {spread:.1f}bps (from {original_spread:.1f}bps)")
+            spread = 0.0  # Will trigger pause logic
 
         return spread
 
-    def _update_tight_spread_mode(self, roc: float):
-        """
-        NP-002: Update tight spread mode based on low-ROC periods.
-
-        - Track consecutive low-ROC cycles (ROC < 2bps)
-        - After 2 minutes of low ROC, activate tight spread mode
-        - Revert to normal spread when ROC increases above 5bps
-        """
-        abs_roc = abs(roc)
-        was_tight = self.tight_spread_mode
-
-        if abs_roc < self.tight_spread_threshold_bps:
-            # Low volatility - track duration
-            if self.low_roc_start_time is None:
-                self.low_roc_start_time = datetime.now()
-
-            elapsed = (datetime.now() - self.low_roc_start_time).total_seconds()
-            if elapsed >= self.tight_spread_activation_seconds and not self.tight_spread_mode:
-                self.tight_spread_mode = True
-                logger.info(f"  📉 TIGHT_SPREAD mode: activated after {elapsed:.0f}s of calm (ROC: {roc:+.1f}bps)")
-        elif abs_roc > self.tight_spread_exit_threshold_bps:
-            # Volatility returned - exit tight mode
-            if self.tight_spread_mode:
-                logger.info(f"  📈 TIGHT_SPREAD mode: deactivated (ROC: {roc:+.1f}bps > {self.tight_spread_exit_threshold_bps}bps)")
-            self.tight_spread_mode = False
-            self.low_roc_start_time = None
 
     async def _check_inventory_rebalance(self, inventory_pct: float, fills: int) -> bool:
         """
@@ -463,6 +422,11 @@ class GridMarketMakerNado:
 
         # Check if at max inventory
         at_max_inventory = inventory_pct >= self.rebalance_threshold_pct
+
+        # Debug: Log inventory check every call when high inventory
+        if inventory_pct > 90:
+            time_at_max = (datetime.now() - self.max_inventory_start_time).total_seconds() if self.max_inventory_start_time else 0
+            logger.info(f"  [REBAL-CHECK] inv={inventory_pct:.0f}% >=95={at_max_inventory} timer={time_at_max:.0f}s fills={self.fills_since_max_inventory}")
 
         if at_max_inventory:
             # Start tracking if not already
@@ -868,10 +832,7 @@ class GridMarketMakerNado:
                 roc = self._calculate_roc()
                 self._update_pause_state(roc)
 
-                # v17: Update tight spread mode based on low-ROC periods (NP-002)
-                self._update_tight_spread_mode(roc)
-
-                # v15: Update dynamic spread EVERY cycle (not just when placing orders)
+                # v18: Update dynamic spread EVERY cycle (not just when placing orders)
                 # This fixes bug where spread gets stuck when no fills/price moves
                 new_spread = self._calculate_dynamic_spread(roc)
                 if new_spread != self.current_spread_bps:
@@ -897,6 +858,11 @@ class GridMarketMakerNado:
 
                 # NP-003: Check for inventory rebalance (Nado-specific due to liquidity issues)
                 inventory_pct = inventory_ratio * 100
+
+                # DEBUG: Log values for rebalance check (remove after debugging)
+                if cycle % 30 == 0:  # Log every 30 cycles (same as status)
+                    logger.info(f"  [REBAL-DBG] notional={self.position_notional:.2f} balance={loop_balance:.2f} max_inv={max_inventory:.2f} ratio={inventory_ratio:.2f} pct={inventory_pct:.0f}%")
+
                 await self._check_inventory_rebalance(inventory_pct, fills)
 
                 # Safety: refresh if no tracked orders
@@ -987,10 +953,10 @@ class GridMarketMakerNado:
 async def main():
     mm = GridMarketMakerNado(
         symbol="ETH-PERP",
-        base_spread_bps=15.0,        # v13: wider spread to beat -8.5 bps adverse selection
+        base_spread_bps=4.0,         # v18: Qwen-calibrated (dynamic overrides this anyway)
         order_size_usd=100.0,        # $100 = Nado minimum
-        num_levels=1,                # 1 level per side (small account)
-        max_inventory_pct=175.0,     # 1.75x - min needed for $100 orders on $72 balance
+        num_levels=2,                # v18: 2 levels per side (Qwen recommendation)
+        max_inventory_pct=175.0,     # 1.75x - min needed for $100 orders on $62 balance
         capital=50.0,                # Ignored - uses dynamic balance
         roc_threshold_bps=50.0,      # v14: back to 50 (20 was too aggressive - caused constant pauses)
         min_pause_duration=120,      # v13: shorter pause (was 300) - resume faster in ranges
