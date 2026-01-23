@@ -103,20 +103,35 @@ pkill -f grid_mm_live && pkill -f grid_mm_nado
 nohup python3 -u -m hibachi_agent.bot_hibachi --live --strategy D --interval 600 > logs/hibachi_bot.log 2>&1 &
 ```
 
-#### Extended Bot - Strategy D
-**Status**: NOT RUNNING (paused for grid MM focus)
-**Script**: `extended_agent/bot_extended.py --strategy D`
-**Log**: `logs/extended_bot.log`
+#### Extended Grid MM (BTC-USD)
+**Status**: RUNNING (v18 POST_ONLY Maker-Only)
+**Script**: `scripts/grid_mm_extended.py`
+**Log**: `logs/grid_mm_extended.log`
 
-**Configuration**:
-- Strategy: Delta Neutral Pairs Trade
-- LLM picks direction (long stronger asset, short weaker)
-- Hold: 1 hour then close both legs
-- Pairs: BTC/SOL
+**Current Performance (2026-01-23)**:
+- Balance: $65.01
+- Position: FLAT
+- Maker Fee: **0.000%** (FREE!)
+- Taker Fee: 0.025% (what we were paying before)
+
+**Configuration (v18 - POST_ONLY Grid MM)**:
+- Symbol: BTC-USD
+- Spread: **DYNAMIC** based on ROC (Qwen-calibrated):
+  - ROC 0-5 bps → 4 bps spread (calm market)
+  - ROC 5-10 bps → 6 bps spread (low volatility)
+  - ROC 10-20 bps → 8 bps spread (moderate volatility)
+  - ROC 20-30 bps → 12 bps spread (high volatility)
+  - ROC 30-50 bps → 15 bps spread (very high volatility)
+  - ROC >50 bps → PAUSE orders
+- Order type: **POST_ONLY** (maker-only, 0% fees)
+- Order size: $50/order
+- Levels: 2 per side
+- Max inventory: 100%
+- Refresh: 5 minutes or 0.5% price move
 
 **Start**:
 ```bash
-nohup python3.11 -u -m extended_agent.bot_extended --live --strategy D --interval 300 > logs/extended_bot.log 2>&1 &
+nohup python3.11 -u scripts/grid_mm_extended.py > logs/grid_mm_extended.log 2>&1 &
 ```
 
 ---
@@ -126,9 +141,9 @@ nohup python3.11 -u -m extended_agent.bot_extended --live --strategy D --interva
 | Exchange | Balance | Bot Running | Recent P&L |
 |----------|---------|-------------|------------|
 | Paradex | $92.68 | Grid MM v12 (BTC) | -$0.01 (24h) |
-| Nado | $62.65 | Grid MM v12 (ETH) | +$0.07 (24h) |
+| Nado | $62.65 | Grid MM v18 (ETH) | +$0.07 (24h) |
 | Hibachi | $44.33 | Grid MM (BTC) + LLM (ETH/SOL/SUI/XRP) | N/A |
-| Extended | ~$100 | Strategy D (paused) | - |
+| Extended | $65.01 | Grid MM v18 POST_ONLY (BTC) | - (just started) |
 
 ---
 
@@ -424,14 +439,15 @@ python3 scripts/pnl_tracker.py
 
 ---
 
-## Current Bot Status (2026-01-22 19:00)
+## Current Bot Status (2026-01-23 00:06)
 
 | Bot | Asset | Strategy | Status |
 |-----|-------|----------|--------|
 | Hibachi Grid MM | BTC only | Spread capture | ✅ RUNNING |
 | Hibachi LLM Bot | ETH, SOL, SUI, XRP, DOGE | Qwen picks best (MAKER-ONLY) | ✅ RUNNING |
-| Nado Grid MM | ETH | Spread capture | ✅ RUNNING |
+| Nado Grid MM | ETH | v18 Qwen-calibrated spread | ✅ RUNNING |
 | Paradex Grid MM | BTC | Spread capture | ✅ RUNNING |
+| Extended Grid MM | BTC | v18 POST_ONLY (0% maker fee) | ✅ RUNNING |
 
 **Real Exchange Data (19:00 Jan 22):**
 
